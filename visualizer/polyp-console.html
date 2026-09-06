@@ -144,7 +144,7 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="version" id="versionTag">v0.3.0</div>
+  <div class="version" id="versionTag">v0.4.0</div>
 </div>
 <div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
@@ -180,8 +180,8 @@
     </div>
     <div class="note">cells/patch sets the default size for new patches, edit an existing one in the inspector</div>
     <div class="slider-block" style="margin-top:14px;">
-      <div class="slider-head"><span>board gap</span><span id="valGap">0.35</span></div>
-      <input type="range" id="sliderGap" min="0" max="120" value="35" step="5">
+      <div class="slider-head"><span>board gap</span><span id="valGap">1.2 cm</span></div>
+      <input type="range" id="sliderGap" min="0" max="600" value="120" step="10">
     </div>
   </div>
 
@@ -240,8 +240,8 @@
 
   // ---------- camera controls: orbit / pan / zoom / re-centerable pivot ----------
   var target = new THREE.Vector3(0, 0, 0);
-  var spherical = {radius: 2.4, theta: 0.35, phi: Math.PI*0.44};
-  var DEFAULT_SPH = {radius:2.4, theta:0.35, phi:Math.PI*0.44};
+  var spherical = {radius: 14, theta: 0.35, phi: Math.PI*0.44};
+  var DEFAULT_SPH = {radius:14, theta:0.35, phi:Math.PI*0.44};
   var DEFAULT_TARGET = target.clone();
 
   function applyCamera(){
@@ -342,7 +342,7 @@
 
   renderer.domElement.addEventListener('wheel', function(e){
     e.preventDefault();
-    spherical.radius = Math.min(20, Math.max(3, spherical.radius * (1 + e.deltaY*0.001)));
+    spherical.radius = Math.min(60, Math.max(1.5, spherical.radius * (1 + e.deltaY*0.001)));
     applyCamera();
   }, {passive:false});
 
@@ -355,7 +355,7 @@
     if(hits[0]){
       var d = camera.position.distanceTo(hits[0].point);
       target.copy(hits[0].point);
-      spherical.radius = Math.min(20, Math.max(3, d));
+      spherical.radius = Math.min(60, Math.max(1.5, d));
       applyCamera();
     }
   });
@@ -405,7 +405,11 @@
     {cols:1, rows:1}, {cols:2, rows:2}, {cols:4, rows:2}, {cols:3, rows:3},
     {cols:4, rows:3}, {cols:4, rows:4}
   ];
-  var CELL_SIZE = 0.42;
+  // World unit = 1 cm. SG90-class 9g servo: ~22.8x12.2x28.5mm body, 4.8mm shaft.
+  var SERVO_BODY = {x:1.22, y:2.28, z:1.28};
+  var SHAFT_OFFSET = SERVO_BODY.z/2 + 0.12;
+  var HORN_WIDTH = 0.5;
+  var CELL_SIZE = Math.max(SERVO_BODY.x, SERVO_BODY.y) + 0.35;
   var addrLabelCache = {};
 
   function makeTextSprite(text, color, w, h, fontPx){
@@ -441,7 +445,7 @@
   }
 
   function isOccupied(gx, gy, exclude){
-    var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
+    var stepX = CELL_SIZE*4+state.gap, stepY = CELL_SIZE*4+state.gap;
     for(var i=0;i<patches.length;i++){
       var p = patches[i];
       if(p!==exclude && Math.round(p.x/stepX)===gx && Math.round(p.y/stepY)===gy) return true;
@@ -454,30 +458,30 @@
     var pivot = new THREE.Group();
     var lx = (-(patch.cols-1)/2 + c) * CELL_SIZE;
     var ly = (-(patch.rows-1)/2 + r) * CELL_SIZE;
-    pivot.position.set(lx, ly, 0.03);
+    pivot.position.set(lx, ly, SERVO_BODY.z/2);
 
-    var body = new THREE.Mesh(new THREE.BoxGeometry(0.16,0.16,0.1), bodyMat.clone());
+    var body = new THREE.Mesh(new THREE.BoxGeometry(SERVO_BODY.x, SERVO_BODY.y, SERVO_BODY.z), bodyMat.clone());
     pivot.add(body);
 
     // wiperPivot is the only thing that rotates: the output shaft, held slightly
     // off the body's face so the sweep reads clearly, like a wiper arm's pivot.
     var wiperPivot = new THREE.Group();
-    wiperPivot.position.set(0, 0, 0.09);
+    wiperPivot.position.set(0, 0, SHAFT_OFFSET);
     pivot.add(wiperPivot);
 
     var stickGroup = new THREE.Group();
     wiperPivot.add(stickGroup);
-    var stick = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.24,8), stickMat.clone());
-    stick.rotation.z = Math.PI/2;
+    // horn is a flat plastic arm, not a rod: box, not cylinder.
+    var stick = new THREE.Mesh(new THREE.BoxGeometry(2.0, HORN_WIDTH, 0.15), stickMat.clone());
     stickGroup.add(stick);
 
-    var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.028,0.03,12), stickMat.clone());
+    var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.25,0.25,12), stickMat.clone());
     hub.rotation.x = Math.PI/2;
     wiperPivot.add(hub);
 
     var paddle = {
       patch: patch, pivot: pivot, bodyMesh: body, wiperPivot: wiperPivot, stickGroup: stickGroup, stick: stick,
-      lx:lx, ly:ly, type: 'sg90', stickLength: 0.24, stickThickness: 0.02, stickOrientation: 0
+      lx:lx, ly:ly, type: 'sg90', stickLength: 2.0, stickThickness: 0.15, stickOrientation: 0
     };
     body.userData.paddle = paddle;
     applyPaddleGeometry(paddle);
@@ -488,30 +492,30 @@
     var t = servoType(pd.type);
     pd.bodyMesh.scale.setScalar(t.footprint);
     pd.stick.geometry.dispose();
-    pd.stick.geometry = new THREE.CylinderGeometry(pd.stickThickness/2, pd.stickThickness/2, pd.stickLength, 8);
+    pd.stick.geometry = new THREE.BoxGeometry(pd.stickLength, HORN_WIDTH, pd.stickThickness);
     pd.stick.position.x = pd.stickLength/2;
     pd.stickGroup.rotation.z = THREE.MathUtils.degToRad(pd.stickOrientation);
   }
 
   function buildPatch(index, gx, gy, cols, rows){
-    var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
+    var stepX = CELL_SIZE*4+state.gap, stepY = CELL_SIZE*4+state.gap;
     var group = new THREE.Group();
     scene.add(group);
 
     var pw = cols*CELL_SIZE, ph = rows*CELL_SIZE;
-    var frame = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.06, ph+0.06), frameMat.clone());
+    var frame = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.4, ph+0.4), frameMat.clone());
     group.add(frame);
 
     var outline = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.PlaneGeometry(pw+0.1, ph+0.1)),
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(pw+0.6, ph+0.6)),
       new THREE.LineBasicMaterial({color:0xc06a24})
     );
-    outline.position.z = 0.001;
+    outline.position.z = 0.01;
     outline.visible = false;
     group.add(outline);
 
     var groupBadge = makeTextSprite('grp', '#c06a24', 160, 80, 40);
-    groupBadge.position.set(-(pw/2)+0.16, ph/2 + 0.12, 0.05);
+    groupBadge.position.set(-(pw/2)+0.5, ph/2 + 0.4, 0.3);
     groupBadge.visible = false;
     group.add(groupBadge);
 
@@ -526,15 +530,15 @@
     for(var i=0;i<patch.paddles.length;i++){ group.add(patch.paddles[i].pivot); }
 
     var addr = makeTextSprite('0x' + (0x40+index).toString(16), '#0e9d68', 256, 96, 44);
-    addr.position.set(0, ph/2 + 0.28, 0.05);
+    addr.position.set(0, ph/2 + 0.9, 0.3);
     group.add(addr);
     patch.addrSprite = addr;
 
     var hitMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(pw+0.06, ph+0.06),
+      new THREE.PlaneGeometry(pw+0.4, ph+0.4),
       new THREE.MeshBasicMaterial({visible:false})
     );
-    hitMesh.position.z = 0.04;
+    hitMesh.position.z = 0.05;
     hitMesh.userData.patch = patch;
     group.add(hitMesh);
     patch.hitMesh = hitMesh;
@@ -543,7 +547,7 @@
   }
 
   function reflowNewPatchPosition(){
-    var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
+    var stepX = CELL_SIZE*4+state.gap, stepY = CELL_SIZE*4+state.gap;
     for(var ring=0; ring<20; ring++){
       for(var gy=-ring; gy<=ring; gy++){
         for(var gx=-ring; gx<=ring; gx++){
@@ -558,7 +562,7 @@
     while(patches.length < count){
       var L = layout();
       var pos = reflowNewPatchPosition();
-      var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
+      var stepX = CELL_SIZE*4+state.gap, stepY = CELL_SIZE*4+state.gap;
       patches.push(buildPatch(patches.length, Math.round(pos.x/stepX), Math.round(pos.y/stepY), L.cols, L.rows));
     }
     while(patches.length > count){
@@ -577,15 +581,15 @@
     patch.group.remove(patch.hitMesh); patch.group.remove(patch.groupBadge);
 
     var pw = cols*CELL_SIZE, ph = rows*CELL_SIZE;
-    patch.frame = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.06, ph+0.06), frameMat.clone());
+    patch.frame = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.4, ph+0.4), frameMat.clone());
     patch.group.add(patch.frame);
     patch.outline = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.PlaneGeometry(pw+0.1, ph+0.1)),
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(pw+0.6, ph+0.6)),
       new THREE.LineBasicMaterial({color:0xc06a24})
     );
-    patch.outline.position.z = 0.001;
+    patch.outline.position.z = 0.01;
     patch.group.add(patch.outline);
-    patch.groupBadge.position.set(-(pw/2)+0.16, ph/2 + 0.12, 0.05);
+    patch.groupBadge.position.set(-(pw/2)+0.5, ph/2 + 0.4, 0.3);
     patch.group.add(patch.groupBadge);
 
     patch.cols = cols; patch.rows = rows;
@@ -599,11 +603,11 @@
         patch.group.add(pd.pivot);
       }
     }
-    patch.addrSprite.position.set(0, ph/2+0.28, 0.05);
+    patch.addrSprite.position.set(0, ph/2+0.9, 0.3);
     patch.group.add(patch.addrSprite);
 
-    var hitMesh = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.06, ph+0.06), new THREE.MeshBasicMaterial({visible:false}));
-    hitMesh.position.z = 0.04; hitMesh.userData.patch = patch;
+    var hitMesh = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.4, ph+0.4), new THREE.MeshBasicMaterial({visible:false}));
+    hitMesh.position.z = 0.05; hitMesh.userData.patch = patch;
     patch.group.add(hitMesh);
     patch.hitMesh = hitMesh;
 
@@ -679,8 +683,8 @@
 
       var sec2 = el('div','section');
       sec2.appendChild(el('div','section-label','Stick'));
-      sec2.appendChild(makeSlider('length', pd.stickLength, 0.1, 0.6, 0.02, function(v){ pd.stickLength=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(2);}));
-      sec2.appendChild(makeSlider('thickness', pd.stickThickness, 0.01, 0.06, 0.005, function(v){ pd.stickThickness=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(3);}));
+      sec2.appendChild(makeSlider('length', pd.stickLength, 0.5, 4, 0.1, function(v){ pd.stickLength=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(1)+' cm';}));
+      sec2.appendChild(makeSlider('thickness', pd.stickThickness, 0.05, 0.4, 0.05, function(v){ pd.stickThickness=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(2)+' cm';}));
       sec2.appendChild(makeSlider('orientation', pd.stickOrientation, 0, 359, 5, function(v){ pd.stickOrientation=v; applyPaddleGeometry(pd); }, function(v){return v+'°';}));
       box.appendChild(sec2);
       return;
@@ -768,7 +772,7 @@
     mode: 'arrange',
     patchCount: 1,
     cellsIdx: 0,
-    gap: 0.35,
+    gap: 1.2,
     fx: 'ripple',
     speed: 1.0,
     scale: 0.9,
@@ -870,7 +874,7 @@
   // ---------- sliders / toggles ----------
   document.getElementById('sliderGap').addEventListener('input', function(e){
     state.gap = e.target.value/100;
-    document.getElementById('valGap').textContent = state.gap.toFixed(2);
+    document.getElementById('valGap').textContent = state.gap.toFixed(1)+' cm';
   });
   document.getElementById('sliderSpeed').addEventListener('input', function(e){
     state.speed = e.target.value/100;
