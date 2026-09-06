@@ -81,6 +81,8 @@
     border-radius:6px;cursor:pointer;transition:background .2s,color .2s;}
   .segmented button.active{background:var(--accent-soft);color:var(--accent);font-weight:600;}
   .segmented button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+  .segmented.compact{flex-wrap:wrap;}
+  .segmented.compact button{flex:1 1 30%;font-size:0.62rem;padding:7px 3px;}
 
   .slider-block{margin-bottom:14px;}
   .slider-block:last-child{margin-bottom:0;}
@@ -134,7 +136,7 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="version" id="versionTag">v0.8.0</div>
+  <div class="version" id="versionTag">v0.9.0</div>
 </div>
 <div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
@@ -205,20 +207,64 @@
       <div class="slider-head"><span>swing range</span><span id="valSwing">±49°</span></div>
       <input type="range" id="sliderSwing" min="0" max="150" value="49" step="1">
     </div>
+    <div class="slider-block">
+      <div class="slider-head"><span>horn length</span><span id="valHornLength">2.0 cm</span></div>
+      <input type="range" id="sliderHornLength" min="5" max="1000" value="20" step="5">
+    </div>
+    <div class="note">horn length here changes every servo at once and sets the default for new ones, use the inspector for one servo at a time</div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Shape (per panel)</div>
+    <div class="segmented compact" id="profileToggle">
+      <button data-profile="uniform" class="active">uniform</button>
+      <button data-profile="stepped">stepped</button>
+      <button data-profile="peaked">peaked</button>
+      <button data-profile="concave">concave</button>
+    </div>
+    <div class="slider-block" style="margin-top:14px;">
+      <div class="slider-head"><span>short end</span><span id="valProfileShort">1.0 cm</span></div>
+      <input type="range" id="sliderProfileShort" min="5" max="1000" value="10" step="5">
+    </div>
+    <div class="slider-block">
+      <div class="slider-head"><span>long end</span><span id="valProfileLong">4.0 cm</span></div>
+      <input type="range" id="sliderProfileLong" min="5" max="1000" value="40" step="5">
+    </div>
+    <div class="slider-block" id="stepsBlock" style="display:none;">
+      <div class="slider-head"><span>steps</span><span id="valProfileSteps">4</span></div>
+      <input type="range" id="sliderProfileSteps" min="2" max="8" value="4" step="1">
+    </div>
+    <div class="note">each panel gets its own taper from its centre outward: peaked = longest in the middle, concave = shortest in the middle, stepped terraces peaked into rings. Uniform leaves horn length to the slider above.</div>
   </div>
 
   <div class="section">
     <div class="section-label">Effect</div>
-    <div class="segmented" id="effectToggle">
+    <div class="segmented compact" id="effectToggle">
       <button data-fx="ripple" class="active">ripple</button>
       <button data-fx="sweep">sweep</button>
       <button data-fx="chase">chase</button>
+      <button data-fx="wind">wind</button>
+      <button data-fx="dominoes">domino</button>
     </div>
     <div class="slider-block" style="margin-top:14px;">
+      <div class="slider-head"><span>direction</span><span id="valDirection">0°</span></div>
+      <input type="range" id="sliderDirection" min="0" max="355" value="0" step="5">
+    </div>
+    <div class="slider-block">
       <div class="slider-head"><span>wavelength</span><span id="valScale">0.9</span></div>
       <input type="range" id="sliderScale" min="20" max="200" value="90" step="5">
     </div>
+    <div class="slider-block">
+      <div class="slider-head"><span>wind strength</span><span id="valWind">60%</span></div>
+      <input type="range" id="sliderWind" min="0" max="95" value="60" step="5">
+    </div>
     <div class="note" id="fxNote">click the wall to move the ripple origin</div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Save</div>
+    <button class="btn primary" id="exportBtn" style="width:100%;">export this setting</button>
+    <div class="note">writes out every patch, servo and effect setting as JSON, enough to drive real PCA9685 firmware from</div>
   </div>
 </div>
 
@@ -268,6 +314,7 @@
     floor: {rot:[-Math.PI/2,0,0],     label:'lying flat, shafts point straight up'},
     roof:  {rot:[Math.PI/2,0,0],      label:'overhead, shafts point straight down like Tuft'}
   };
+  var currentAspectName = 'wall';
   function setAspect(name){
     var a = ASPECTS[name];
     rigRoot.rotation.set(a.rot[0], a.rot[1], a.rot[2]);
@@ -328,7 +375,9 @@
     raycaster.setFromCamera(mouse, camera);
     var meshes = [];
     for(var i=0;i<patches.length;i++){
-      for(var j=0;j<patches[i].paddles.length;j++){ meshes.push(patches[i].paddles[j].bodyMesh); }
+      for(var j=0;j<patches[i].paddles.length;j++){
+        meshes.push(patches[i].paddles[j].bodyMesh, patches[i].paddles[j].topBody);
+      }
     }
     var hits = raycaster.intersectObjects(meshes);
     return hits[0] ? hits[0].object.userData.paddle : null;
@@ -484,6 +533,31 @@
   var FACTORY_SERVO_TEMPLATE = {type:'sg90', stickLength:2.0, stickThickness:0.15, stickOrientation:0, mountTilt:0, mountPan:0};
   var defaultServoTemplate = Object.assign({}, FACTORY_SERVO_TEMPLATE);
 
+  // horn-length taper, computed per panel from its own centre outward so each
+  // board can read as its own little tuft rather than one taper across the rig.
+  var FACTORY_PROFILE = {mode:'uniform', short:1.0, long:4.0, steps:4};
+  var profileState = Object.assign({}, FACTORY_PROFILE);
+  function applyLengthProfile(){
+    if(profileState.mode==='uniform') return;
+    for(var i=0;i<patches.length;i++){
+      var p = patches[i];
+      var maxR = 0;
+      for(var j=0;j<p.paddles.length;j++){ maxR = Math.max(maxR, Math.hypot(p.paddles[j].lx, p.paddles[j].ly)); }
+      if(maxR<=0) maxR = 1;
+      for(var j2=0;j2<p.paddles.length;j2++){
+        var pd = p.paddles[j2];
+        var norm = Math.hypot(pd.lx, pd.ly)/maxR;
+        var t;
+        if(profileState.mode==='peaked'){ t = 1-norm; }
+        else if(profileState.mode==='concave'){ t = norm; }
+        else { var steps=profileState.steps; t = Math.min(1, Math.max(0, Math.floor((1-norm)*steps)/Math.max(1,steps-1))); }
+        pd.stickLength = profileState.short + (profileState.long-profileState.short)*t;
+        applyPaddleGeometry(pd);
+      }
+    }
+    if(inspectorTarget && inspectorTarget.kind==='paddle') renderInspector();
+  }
+
   function layout(){
     var preset = CELL_PRESETS[state.cellsIdx];
     return {cols:preset.cols, rows:preset.rows};
@@ -499,7 +573,7 @@
   }
 
   function buildPaddle(patch, r, c){
-    // pivot never rotates: it is the servo's fixed mounting point on the panel.
+    // pivot never rotates: it is the BOTTOM servo's fixed case, bolted to the panel.
     var pivot = new THREE.Group();
     var lx = (-(patch.cols-1)/2 + c) * CELL_SIZE;
     var ly = (-(patch.rows-1)/2 + r) * CELL_SIZE;
@@ -508,11 +582,25 @@
     var body = new THREE.Mesh(new THREE.BoxGeometry(SERVO_BODY.x, SERVO_BODY.y, SERVO_BODY.z), bodyMat.clone());
     pivot.add(body);
 
-    // wiperPivot is the only thing that rotates: the output shaft, held slightly
-    // off the body's face so the sweep reads clearly, like a wiper arm's pivot.
+    // panPivot is the bottom servo's OUTPUT: a servo mounted on a servo, it
+    // carries the whole top servo (case, shaft, horn) around in yaw so a stalk
+    // can point at a direction, not just bend within one fixed plane.
+    var panPivot = new THREE.Group();
+    panPivot.position.set(0, 0, SHAFT_OFFSET);
+    pivot.add(panPivot);
+
+    var topBody = new THREE.Mesh(
+      new THREE.BoxGeometry(SERVO_BODY.x*0.65, SERVO_BODY.y*0.65, SERVO_BODY.z*0.65),
+      bodyMat.clone()
+    );
+    topBody.position.z = SERVO_BODY.z*0.325 + 0.05;
+    panPivot.add(topBody);
+
+    // wiperPivot is the top servo's own output: only this and the horn beyond
+    // it sweep on their own, held slightly proud of the top case for clarity.
     var wiperPivot = new THREE.Group();
-    wiperPivot.position.set(0, 0, SHAFT_OFFSET);
-    pivot.add(wiperPivot);
+    wiperPivot.position.set(0, 0, SERVO_BODY.z*0.65 + 0.12);
+    panPivot.add(wiperPivot);
 
     var stickGroup = new THREE.Group();
     wiperPivot.add(stickGroup);
@@ -525,12 +613,14 @@
     wiperPivot.add(hub);
 
     var paddle = {
-      patch: patch, pivot: pivot, bodyMesh: body, wiperPivot: wiperPivot, stickGroup: stickGroup, stick: stick,
+      patch: patch, pivot: pivot, bodyMesh: body, panPivot: panPivot, topBody: topBody,
+      wiperPivot: wiperPivot, stickGroup: stickGroup, stick: stick,
       lx:lx, ly:ly, type: defaultServoTemplate.type, stickLength: defaultServoTemplate.stickLength,
       stickThickness: defaultServoTemplate.stickThickness, stickOrientation: defaultServoTemplate.stickOrientation,
       mountTilt: defaultServoTemplate.mountTilt, mountPan: defaultServoTemplate.mountPan
     };
     body.userData.paddle = paddle;
+    topBody.userData.paddle = paddle;
     applyPaddleGeometry(paddle);
     applyMountRotation(paddle);
     return paddle;
@@ -546,6 +636,7 @@
   function applyPaddleGeometry(pd){
     var t = servoType(pd.type);
     pd.bodyMesh.scale.setScalar(t.footprint);
+    pd.topBody.scale.setScalar(t.footprint);
     pd.stick.geometry.dispose();
     pd.stick.geometry = new THREE.BoxGeometry(pd.stickLength, HORN_WIDTH, pd.stickThickness);
     pd.stick.position.x = pd.stickLength/2;
@@ -678,6 +769,32 @@
       ('0x40–0x' + (0x40+Math.max(0,patches.length-1)).toString(16)) : '–';
   }
 
+  function buildExportData(){
+    return {
+      polypVersion: document.getElementById('versionTag').textContent,
+      aspect: currentAspectName,
+      rig: {panelSpacingCm: state.gap, servoSpacingCm: state.cellGap, lengthProfile: profileState.mode},
+      effect: {
+        type: state.fx, directionDeg: state.direction, speedMultiplier: state.speed,
+        wavelengthCm: state.scale, windStrength: state.windStrength, swingRangeDeg: state.swingDeg
+      },
+      boards: patches.map(function(p){
+        return {
+          i2cAddress: '0x' + (0x40+p.index).toString(16),
+          positionCm: {x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2)},
+          rotationDeg: p.rotationDeg, cols: p.cols, rows: p.rows,
+          servos: p.paddles.map(function(pd, ch){
+            return {
+              channel: ch, row: Math.floor(ch/p.cols), col: ch % p.cols, type: pd.type,
+              stickLengthCm: +pd.stickLength.toFixed(2), stickThicknessCm: +pd.stickThickness.toFixed(3),
+              stickOrientationDeg: pd.stickOrientation, mountTiltDeg: pd.mountTilt, mountPanDeg: pd.mountPan
+            };
+          })
+        };
+      })
+    };
+  }
+
   // ---------- selection ----------
   function clearSelection(){
     multiSelect.forEach(function(p){ p.outline.visible = false; });
@@ -715,6 +832,36 @@
     box.innerHTML = '';
     if(!inspectorTarget){ box.classList.remove('visible'); return; }
     box.classList.add('visible');
+
+    if(inspectorTarget.kind === 'export'){
+      box.appendChild(el('div','section-label','EXPORT · '+patches.length+' boards'));
+      var sec = el('div','section');
+      var json = JSON.stringify(buildExportData(), null, 2);
+      var ta = document.createElement('textarea');
+      ta.value = json; ta.readOnly = true;
+      ta.style.cssText = 'width:100%;height:260px;font-family:"JetBrains Mono",monospace;font-size:0.66rem;'
+        + 'background:rgba(16,29,23,0.04);border:1px solid var(--panel-line);border-radius:8px;padding:8px;'
+        + 'color:var(--ink);resize:vertical;white-space:pre;';
+      sec.appendChild(ta);
+      var copyBtn = el('button','btn primary','copy to clipboard');
+      copyBtn.style.marginTop = '8px';
+      copyBtn.addEventListener('click', function(){
+        function done(ok){ copyBtn.textContent = ok ? 'copied' : 'select the text and press ctrl+c'; setTimeout(function(){ copyBtn.textContent='copy to clipboard'; }, 1600); }
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(ta.value).then(function(){ done(true); }).catch(function(){
+            ta.focus(); ta.select();
+            try{ done(document.execCommand('copy')); }catch(err){ done(false); }
+          });
+        } else {
+          ta.focus(); ta.select();
+          try{ done(document.execCommand('copy')); }catch(err){ done(false); }
+        }
+      });
+      sec.appendChild(copyBtn);
+      sec.appendChild(el('div','note','channel = row*cols+col within each board, in the same order the PCA9685 library expects'));
+      box.appendChild(sec);
+      return;
+    }
 
     if(inspectorTarget.kind === 'paddle'){
       var pd = inspectorTarget.ref;
@@ -869,7 +1016,9 @@
     fx: 'ripple',
     speed: 1.0,
     swingDeg: 49,
-    scale: 0.9
+    scale: 0.9,
+    direction: 0,
+    windStrength: 0.6
   };
   var state = Object.assign({}, DEFAULT_STATE, {rippleOrigin: new THREE.Vector2(0,0)});
   setPatchCount(state.patchCount);
@@ -923,17 +1072,73 @@
     state.scale = e.target.value/100;
     document.getElementById('valScale').textContent = state.scale.toFixed(2);
   });
+  document.getElementById('sliderDirection').addEventListener('input', function(e){
+    state.direction = parseInt(e.target.value, 10);
+    document.getElementById('valDirection').textContent = state.direction+'°';
+  });
+  document.getElementById('sliderWind').addEventListener('input', function(e){
+    state.windStrength = e.target.value/100;
+    document.getElementById('valWind').textContent = e.target.value+'%';
+  });
+
+  // global horn length: change it without having to select a servo first,
+  // applies to every servo immediately and becomes the default for new ones.
+  document.getElementById('sliderHornLength').addEventListener('input', function(e){
+    var v = e.target.value/10;
+    document.getElementById('valHornLength').textContent = v.toFixed(1)+' cm';
+    defaultServoTemplate.stickLength = v;
+    for(var i=0;i<patches.length;i++){
+      for(var j=0;j<patches[i].paddles.length;j++){
+        patches[i].paddles[j].stickLength = v;
+        applyPaddleGeometry(patches[i].paddles[j]);
+      }
+    }
+    if(inspectorTarget && inspectorTarget.kind==='paddle') renderInspector();
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', function(){
+    multiSelect.forEach(function(p){ p.outline.visible = false; });
+    multiSelect = [];
+    inspectorTarget = {kind:'export'};
+    renderInspector();
+  });
+
+  document.getElementById('profileToggle').addEventListener('click', function(e){
+    var btn = e.target.closest('button'); if(!btn) return;
+    profileState.mode = btn.dataset.profile;
+    document.querySelectorAll('#profileToggle button').forEach(function(b){ b.classList.toggle('active', b===btn); });
+    document.getElementById('stepsBlock').style.display = profileState.mode==='stepped' ? 'block' : 'none';
+    applyLengthProfile();
+  });
+  document.getElementById('sliderProfileShort').addEventListener('input', function(e){
+    profileState.short = e.target.value/10;
+    document.getElementById('valProfileShort').textContent = profileState.short.toFixed(1)+' cm';
+    applyLengthProfile();
+  });
+  document.getElementById('sliderProfileLong').addEventListener('input', function(e){
+    profileState.long = e.target.value/10;
+    document.getElementById('valProfileLong').textContent = profileState.long.toFixed(1)+' cm';
+    applyLengthProfile();
+  });
+  document.getElementById('sliderProfileSteps').addEventListener('input', function(e){
+    profileState.steps = parseInt(e.target.value, 10);
+    document.getElementById('valProfileSteps').textContent = profileState.steps;
+    applyLengthProfile();
+  });
 
   document.getElementById('aspectToggle').addEventListener('click', function(e){
     var btn = e.target.closest('button'); if(!btn) return;
     setAspect(btn.dataset.aspect);
+    currentAspectName = btn.dataset.aspect;
     document.querySelectorAll('#aspectToggle button').forEach(function(b){ b.classList.toggle('active', b===btn); });
   });
 
   var fxNotes = {
-    ripple: 'click the wall to move the ripple origin',
-    sweep: 'travels left to right across the whole rig',
-    chase: 'diagonal chase across the whole rig'
+    ripple: 'click the wall to move the ripple origin, stalks turn to face it',
+    sweep: 'a wave travels along "direction", stalks bend side to side as it passes',
+    chase: 'one bright band travels along "direction", the rest rest still',
+    wind: 'stalks lean toward "direction" by "wind strength" and never blow back past that lean, tips ripple on top',
+    dominoes: 'a fall cascades along "direction": snap over, hold, spring back, repeat'
   };
   document.getElementById('effectToggle').addEventListener('click', function(e){
     var btn = e.target.closest('button'); if(!btn) return;
@@ -960,11 +1165,13 @@
     clearSelection();
     while(patches.length){ var p = patches.pop(); rigRoot.remove(p.group); }
     defaultServoTemplate = Object.assign({}, FACTORY_SERVO_TEMPLATE);
+    profileState = Object.assign({}, FACTORY_PROFILE);
     Object.assign(state, DEFAULT_STATE);
     state.rippleOrigin.set(0,0);
     CELL_SIZE = Math.max(SERVO_BODY.x, SERVO_BODY.y) + state.cellGap;
     lastStep = CELL_SIZE*4 + state.gap;
     setAspect('wall');
+    currentAspectName = 'wall';
 
     document.getElementById('sliderPatches').value = state.patchCount;
     document.getElementById('valPatches').textContent = state.patchCount;
@@ -980,9 +1187,23 @@
     document.getElementById('valSwing').textContent = '±'+state.swingDeg+'°';
     document.getElementById('sliderScale').value = state.scale*100;
     document.getElementById('valScale').textContent = state.scale.toFixed(2);
+    document.getElementById('sliderDirection').value = state.direction;
+    document.getElementById('valDirection').textContent = state.direction+'°';
+    document.getElementById('sliderWind').value = state.windStrength*100;
+    document.getElementById('valWind').textContent = (state.windStrength*100)+'%';
+    document.getElementById('sliderHornLength').value = defaultServoTemplate.stickLength*10;
+    document.getElementById('valHornLength').textContent = defaultServoTemplate.stickLength.toFixed(1)+' cm';
+    document.getElementById('sliderProfileShort').value = profileState.short*10;
+    document.getElementById('valProfileShort').textContent = profileState.short.toFixed(1)+' cm';
+    document.getElementById('sliderProfileLong').value = profileState.long*10;
+    document.getElementById('valProfileLong').textContent = profileState.long.toFixed(1)+' cm';
+    document.getElementById('sliderProfileSteps').value = profileState.steps;
+    document.getElementById('valProfileSteps').textContent = profileState.steps;
+    document.getElementById('stepsBlock').style.display = 'none';
 
     document.querySelectorAll('#aspectToggle button').forEach(function(b){ b.classList.toggle('active', b.dataset.aspect==='wall'); });
     document.querySelectorAll('#effectToggle button').forEach(function(b){ b.classList.toggle('active', b.dataset.fx==='ripple'); });
+    document.querySelectorAll('#profileToggle button').forEach(function(b){ b.classList.toggle('active', b.dataset.profile==='uniform'); });
     document.getElementById('fxNote').textContent = fxNotes.ripple;
     document.getElementById('modeArrange').click();
 
@@ -996,15 +1217,48 @@
 
   // ---------- animate ----------
   var clock = new THREE.Clock();
-  function effectValue(wx, wy, t){
+
+  // dominoes: a directional front sweeps through at `speed`, each stalk snaps
+  // over fast, holds down, springs back slow, then waits for the next pass.
+  function dominoValue(proj, speedTerm){
+    var phase = speedTerm - proj/state.scale;
+    if(phase < 0) return 0;
+    var fallDur=0.15, holdDur=0.5, riseDur=0.6, period=6;
+    var cyc = phase % period;
+    if(cyc < fallDur) return cyc/fallDur;
+    if(cyc < fallDur+holdDur) return 1;
+    if(cyc < fallDur+holdDur+riseDur) return 1-(cyc-fallDur-holdDur)/riseDur;
+    return 0;
+  }
+
+  // returns {value, yaw}: value drives the top servo's sweep (wiperPivot),
+  // yaw drives the bottom servo's pan (panPivot) so directional effects can
+  // point the whole stalk, not just bend it in one fixed plane.
+  function computeMotion(wx, wy, t){
+    var dirRad = THREE.MathUtils.degToRad(state.direction);
+    var proj = wx*Math.cos(dirRad) + wy*Math.sin(dirRad);
+    var speedTerm = t*state.speed*3;
+    var yaw = dirRad, value;
+
     if(state.fx === 'ripple'){
-      var d = Math.hypot(wx-state.rippleOrigin.x, wy-state.rippleOrigin.y);
-      return Math.sin(d/state.scale - t*state.speed*3);
+      var dx = wx-state.rippleOrigin.x, dy = wy-state.rippleOrigin.y;
+      value = Math.sin(Math.hypot(dx,dy)/state.scale - speedTerm);
+      yaw = Math.atan2(-dx, -dy); // stalks turn to face the disturbance
     } else if(state.fx === 'sweep'){
-      return Math.sin(wx/state.scale - t*state.speed*3);
-    } else {
-      return Math.sin((wx+wy)/state.scale - t*state.speed*3);
+      value = Math.sin(proj/state.scale - speedTerm);
+    } else if(state.fx === 'chase'){
+      // a single bright band travels along the direction, everything else rests
+      value = Math.pow(Math.max(0, Math.cos(proj/state.scale - speedTerm)), 8);
+    } else if(state.fx === 'wind'){
+      // constant lean plus a gust that only ever adds to it, tips ripple above
+      // the lean but the stalk never swings back past upright on its own
+      var lean = state.windStrength;
+      var gust = Math.max(0, Math.sin(proj/state.scale - speedTerm));
+      value = lean + (1-lean)*gust;
+    } else { // dominoes
+      value = dominoValue(proj, speedTerm);
     }
+    return {value:value, yaw:yaw};
   }
 
   var tmpV = new THREE.Vector3();
@@ -1020,8 +1274,15 @@
         var pd = p.paddles[j];
         tmpV.set(pd.lx, pd.ly, 0).applyEuler(new THREE.Euler(0,0,p.group.rotation.z));
         var wx = p.x + tmpV.x, wy = p.y + tmpV.y;
-        var v = state.mode==='run' ? effectValue(wx, wy, t) : Math.sin(t*0.4*state.speed + i*0.4 + j*0.15)*0.4;
-        pd.wiperPivot.rotation.z = v * THREE.MathUtils.degToRad(state.swingDeg); // windscreen-wiper sweep, body stays put
+        if(state.mode==='run'){
+          var m = computeMotion(wx, wy, t);
+          pd.wiperPivot.rotation.z = m.value * THREE.MathUtils.degToRad(state.swingDeg);
+          pd.panPivot.rotation.y = m.yaw;
+        } else {
+          var v = Math.sin(t*0.4*state.speed + i*0.4 + j*0.15)*0.4;
+          pd.wiperPivot.rotation.z = v * THREE.MathUtils.degToRad(state.swingDeg);
+          pd.panPivot.rotation.y = 0;
+        }
       }
     }
     renderer.render(scene, camera);
