@@ -82,16 +82,6 @@
   .segmented button.active{background:var(--accent-soft);color:var(--accent);font-weight:600;}
   .segmented button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
 
-  .dial-row{display:flex;gap:14px;justify-content:space-between;}
-  .dial-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;
-    -webkit-user-select:none;user-select:none;}
-  .dial-wrap svg{cursor:grab;touch-action:none;}
-  .dial-wrap svg:active{cursor:grabbing;}
-  .dial-label{font-size:0.62rem;letter-spacing:0.06em;text-transform:uppercase;
-    color:var(--ink-faint);text-align:center;}
-  .dial-value{font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:var(--ink);
-    font-variant-numeric:tabular-nums;font-weight:600;}
-
   .slider-block{margin-bottom:14px;}
   .slider-block:last-child{margin-bottom:0;}
   .slider-head{display:flex;justify-content:space-between;font-size:0.72rem;
@@ -144,7 +134,7 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="version" id="versionTag">v0.7.0</div>
+  <div class="version" id="versionTag">v0.8.0</div>
 </div>
 <div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
@@ -153,7 +143,8 @@
   <b>scroll</b> zoom · <b>double-click</b> set rotation point
 </div>
 
-<button class="reset-btn" id="resetView">reset view</button>
+<button class="reset-btn" id="resetView" style="right:150px;">reset view</button>
+<button class="reset-btn" id="resetRig">reset rig</button>
 
 <div class="panel-box dock">
   <div class="section">
@@ -184,14 +175,35 @@
 
   <div class="section">
     <div class="section-label">Layout</div>
-    <div class="dial-row">
-      <div class="dial-wrap" id="dialPatches"></div>
-      <div class="dial-wrap" id="dialCells"></div>
+    <div class="slider-block">
+      <div class="slider-head"><span>patches</span><span id="valPatches">1</span></div>
+      <input type="range" id="sliderPatches" min="1" max="9" value="1" step="1">
+    </div>
+    <div class="slider-block">
+      <div class="slider-head"><span>cells/patch</span><span id="valCells">1×1</span></div>
+      <input type="range" id="sliderCells" min="0" max="5" value="0" step="1">
     </div>
     <div class="note">cells/patch sets the default size for new patches, edit an existing one in the inspector</div>
     <div class="slider-block" style="margin-top:14px;">
       <div class="slider-head"><span>panel spacing</span><span id="valGap">1.2 cm</span></div>
       <input type="range" id="sliderGap" min="0" max="600" value="120" step="10">
+    </div>
+    <div class="slider-block">
+      <div class="slider-head"><span>servo spacing</span><span id="valCellGap">0.35 cm</span></div>
+      <input type="range" id="sliderCellGap" min="0" max="300" value="35" step="5">
+    </div>
+    <div class="note">panel spacing is the gap between boards, servo spacing is the gap between servos on the same board</div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Motion</div>
+    <div class="slider-block">
+      <div class="slider-head"><span>speed</span><span id="valSpeed">1.0x</span></div>
+      <input type="range" id="sliderSpeed" min="10" max="300" value="100" step="5">
+    </div>
+    <div class="slider-block">
+      <div class="slider-head"><span>swing range</span><span id="valSwing">±49°</span></div>
+      <input type="range" id="sliderSwing" min="0" max="150" value="49" step="1">
     </div>
   </div>
 
@@ -203,10 +215,6 @@
       <button data-fx="chase">chase</button>
     </div>
     <div class="slider-block" style="margin-top:14px;">
-      <div class="slider-head"><span>speed</span><span id="valSpeed">1.0x</span></div>
-      <input type="range" id="sliderSpeed" min="10" max="300" value="100" step="5">
-    </div>
-    <div class="slider-block">
       <div class="slider-head"><span>wavelength</span><span id="valScale">0.9</span></div>
       <input type="range" id="sliderScale" min="20" max="200" value="90" step="5">
     </div>
@@ -473,7 +481,8 @@
   var nextGroupId = 1;
   // the locked-in servo settings: every new servo is born with these, and
   // "match all servos" pushes them onto every servo that already exists.
-  var defaultServoTemplate = {type:'sg90', stickLength:2.0, stickThickness:0.15, stickOrientation:0, mountTilt:0, mountPan:0};
+  var FACTORY_SERVO_TEMPLATE = {type:'sg90', stickLength:2.0, stickThickness:0.15, stickOrientation:0, mountTilt:0, mountPan:0};
+  var defaultServoTemplate = Object.assign({}, FACTORY_SERVO_TEMPLATE);
 
   function layout(){
     var preset = CELL_PRESETS[state.cellsIdx];
@@ -851,108 +860,44 @@
   }
 
   // ---------- global state ----------
-  var state = {
+  var DEFAULT_STATE = {
     mode: 'arrange',
     patchCount: 1,
     cellsIdx: 0,
     gap: 1.2,
+    cellGap: 0.35,
     fx: 'ripple',
     speed: 1.0,
-    scale: 0.9,
-    rippleOrigin: new THREE.Vector2(0,0)
+    swingDeg: 49,
+    scale: 0.9
   };
+  var state = Object.assign({}, DEFAULT_STATE, {rippleOrigin: new THREE.Vector2(0,0)});
   setPatchCount(state.patchCount);
   var lastStep = CELL_SIZE*4 + state.gap;
 
   // ---------- dock dials ----------
-  function makeDial(mount, opts){
-    var size = 84, cx = size/2, cy = size/2, r = 32;
-    var sweep = Math.PI * 1.5;
-    var start = Math.PI*0.5 + Math.PI*0.25;
-
-    var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    svg.setAttribute('width', size); svg.setAttribute('height', size);
-    svg.setAttribute('viewBox', '0 0 '+size+' '+size);
-
-    function arcPath(fromA, toA){
-      var x1 = cx + r*Math.cos(fromA), y1 = cy + r*Math.sin(fromA);
-      var x2 = cx + r*Math.cos(toA), y2 = cy + r*Math.sin(toA);
-      var large = (toA-fromA) > Math.PI ? 1 : 0;
-      return 'M '+x1+' '+y1+' A '+r+' '+r+' 0 '+large+' 1 '+x2+' '+y2;
-    }
-
-    var track = document.createElementNS('http://www.w3.org/2000/svg','path');
-    track.setAttribute('d', arcPath(start, start+sweep));
-    track.setAttribute('stroke', 'rgba(16,29,23,0.12)');
-    track.setAttribute('stroke-width', 6);
-    track.setAttribute('fill', 'none');
-    track.setAttribute('stroke-linecap','round');
-    svg.appendChild(track);
-
-    var fill = document.createElementNS('http://www.w3.org/2000/svg','path');
-    fill.setAttribute('stroke', opts.color || '#0e9d68');
-    fill.setAttribute('stroke-width', 6);
-    fill.setAttribute('fill', 'none');
-    fill.setAttribute('stroke-linecap','round');
-    svg.appendChild(fill);
-
-    var knob = document.createElementNS('http://www.w3.org/2000/svg','circle');
-    knob.setAttribute('r', 4);
-    knob.setAttribute('fill', opts.color || '#0e9d68');
-    svg.appendChild(knob);
-
-    var wrap = document.createElement('div');
-    wrap.className = 'dial-wrap';
-    wrap.appendChild(svg);
-    var label = document.createElement('div');
-    label.className = 'dial-label'; label.textContent = opts.label;
-    var value = document.createElement('div');
-    value.className = 'dial-value';
-    wrap.appendChild(value); wrap.appendChild(label);
-    mount.appendChild(wrap);
-
-    var idx = opts.value;
-    function render(){
-      var t = (idx - opts.min) / (opts.max - opts.min);
-      fill.setAttribute('d', arcPath(start, start + sweep*t));
-      var ang = start + sweep*t;
-      knob.setAttribute('cx', cx + r*Math.cos(ang));
-      knob.setAttribute('cy', cy + r*Math.sin(ang));
-      value.textContent = opts.format ? opts.format(idx) : idx;
-    }
-    render();
-
-    var dragging = false, startY = 0, startVal = 0;
-    svg.addEventListener('pointerdown', function(e){
-      dragging = true; startY = e.clientY; startVal = idx;
-      svg.setPointerCapture(e.pointerId);
-    });
-    svg.addEventListener('pointermove', function(e){
-      if(!dragging) return;
-      var dy = startY - e.clientY;
-      var range = opts.max - opts.min;
-      var next = startVal + (dy/120) * range;
-      idx = Math.min(opts.max, Math.max(opts.min, Math.round(next)));
-      render();
-      opts.onChange(idx);
-    });
-    ['pointerup','pointercancel'].forEach(function(ev){
-      svg.addEventListener(ev, function(){ dragging = false; });
-    });
-
-    return {set:function(v){ idx=v; render(); }};
-  }
-
-  makeDial(document.getElementById('dialPatches'), {
-    label:'patches', min:1, max:9, step:1, value:state.patchCount, color:'#0e9d68',
-    format:function(v){ return v; },
-    onChange:function(v){ state.patchCount = v; setPatchCount(v); }
+  document.getElementById('sliderPatches').addEventListener('input', function(e){
+    state.patchCount = parseInt(e.target.value, 10);
+    document.getElementById('valPatches').textContent = state.patchCount;
+    setPatchCount(state.patchCount);
   });
 
-  makeDial(document.getElementById('dialCells'), {
-    label:'cells/patch', min:0, max:CELL_PRESETS.length-1, step:1, value:state.cellsIdx, color:'#c06a24',
-    format:function(v){ var p = CELL_PRESETS[v]; return p.cols+'×'+p.rows; },
-    onChange:function(v){ state.cellsIdx = v; }
+  document.getElementById('sliderCells').addEventListener('input', function(e){
+    state.cellsIdx = parseInt(e.target.value, 10);
+    var p = CELL_PRESETS[state.cellsIdx];
+    document.getElementById('valCells').textContent = p.cols+'×'+p.rows;
+  });
+
+  document.getElementById('sliderCellGap').addEventListener('input', function(e){
+    state.cellGap = e.target.value/100;
+    document.getElementById('valCellGap').textContent = state.cellGap.toFixed(2)+' cm';
+    CELL_SIZE = Math.max(SERVO_BODY.x, SERVO_BODY.y) + state.cellGap;
+    for(var i=0;i<patches.length;i++){ rebuildPatchGeometry(patches[i], patches[i].cols, patches[i].rows); }
+  });
+
+  document.getElementById('sliderSwing').addEventListener('input', function(e){
+    state.swingDeg = parseFloat(e.target.value);
+    document.getElementById('valSwing').textContent = '±'+state.swingDeg+'°';
   });
 
   // ---------- sliders / toggles ----------
@@ -1011,6 +956,42 @@
     document.getElementById('hint').innerHTML = '<b>click the wall</b> move the ripple · <b>right-drag</b> pan · <b>scroll</b> zoom · <b>double-click</b> set rotation point';
   });
 
+  document.getElementById('resetRig').addEventListener('click', function(){
+    clearSelection();
+    while(patches.length){ var p = patches.pop(); rigRoot.remove(p.group); }
+    defaultServoTemplate = Object.assign({}, FACTORY_SERVO_TEMPLATE);
+    Object.assign(state, DEFAULT_STATE);
+    state.rippleOrigin.set(0,0);
+    CELL_SIZE = Math.max(SERVO_BODY.x, SERVO_BODY.y) + state.cellGap;
+    lastStep = CELL_SIZE*4 + state.gap;
+    setAspect('wall');
+
+    document.getElementById('sliderPatches').value = state.patchCount;
+    document.getElementById('valPatches').textContent = state.patchCount;
+    document.getElementById('sliderCells').value = state.cellsIdx;
+    document.getElementById('valCells').textContent = CELL_PRESETS[state.cellsIdx].cols+'×'+CELL_PRESETS[state.cellsIdx].rows;
+    document.getElementById('sliderGap').value = state.gap*100;
+    document.getElementById('valGap').textContent = state.gap.toFixed(1)+' cm';
+    document.getElementById('sliderCellGap').value = state.cellGap*100;
+    document.getElementById('valCellGap').textContent = state.cellGap.toFixed(2)+' cm';
+    document.getElementById('sliderSpeed').value = state.speed*100;
+    document.getElementById('valSpeed').textContent = state.speed.toFixed(1)+'x';
+    document.getElementById('sliderSwing').value = state.swingDeg;
+    document.getElementById('valSwing').textContent = '±'+state.swingDeg+'°';
+    document.getElementById('sliderScale').value = state.scale*100;
+    document.getElementById('valScale').textContent = state.scale.toFixed(2);
+
+    document.querySelectorAll('#aspectToggle button').forEach(function(b){ b.classList.toggle('active', b.dataset.aspect==='wall'); });
+    document.querySelectorAll('#effectToggle button').forEach(function(b){ b.classList.toggle('active', b.dataset.fx==='ripple'); });
+    document.getElementById('fxNote').textContent = fxNotes.ripple;
+    document.getElementById('modeArrange').click();
+
+    setPatchCount(state.patchCount);
+    spherical.radius = DEFAULT_SPH.radius; spherical.theta = DEFAULT_SPH.theta; spherical.phi = DEFAULT_SPH.phi;
+    target.copy(DEFAULT_TARGET);
+    applyCamera();
+  });
+
   renderInspector();
 
   // ---------- animate ----------
@@ -1039,8 +1020,8 @@
         var pd = p.paddles[j];
         tmpV.set(pd.lx, pd.ly, 0).applyEuler(new THREE.Euler(0,0,p.group.rotation.z));
         var wx = p.x + tmpV.x, wy = p.y + tmpV.y;
-        var v = state.mode==='run' ? effectValue(wx, wy, t) : Math.sin(t*0.4 + i*0.4 + j*0.15)*0.15;
-        pd.wiperPivot.rotation.z = v * 0.85; // windscreen-wiper sweep, body stays put
+        var v = state.mode==='run' ? effectValue(wx, wy, t) : Math.sin(t*0.4*state.speed + i*0.4 + j*0.15)*0.4;
+        pd.wiperPivot.rotation.z = v * THREE.MathUtils.degToRad(state.swingDeg); // windscreen-wiper sweep, body stays put
       }
     }
     renderer.render(scene, camera);
