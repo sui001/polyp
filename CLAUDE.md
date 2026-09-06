@@ -27,9 +27,13 @@ by anything in gen3d wanting a servo grid, not scoped to Tuft.
 - `visualizer/` — WebGL concept console: arrange patches, preview an effect
   running across them as servo-paddle tilt. Concept stage, not driving real
   hardware yet.
+- `index.html` at repo root mirrors `visualizer/polyp-console.html`, it's what
+  GitHub Pages serves at sui001.github.io/polyp. Keep both in sync by hand.
 
-Repo is private. No thesis/theory writing here, that belongs in
-`affective-devices/docs/`.
+Repo is **public** (made so 2026-09-06 so the free GitHub Pages plan could
+serve the console, private repos need GitHub Pro for Pages). No thesis/theory
+writing here regardless, that belongs in `affective-devices/docs/`, and stays
+out even more strictly now that this repo isn't private.
 
 ## Conventions
 
