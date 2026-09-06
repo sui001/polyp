@@ -1,8 +1,8 @@
 <!--
   Polyp patch-layout console. Concept-stage: arrange PCA9685 "patches" into a
   shared grid, then run an effect across the stitched space. Camera controls
-  and dial widget are the same hand-rolled implementation as the Tuft console,
-  kept consistent on purpose.
+  and dial widget share their implementation with the Tuft console on purpose,
+  the two are meant to read as one family of tools.
 -->
 <title>Polyp</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -10,17 +10,18 @@
 
 <style>
   :root{
-    --bg:#080c0a;
-    --panel: rgba(15,21,17,0.74);
-    --ink:#eaf2ea;
-    --ink-dim:#8fa596;
-    --ink-faint:#526158;
-    --accent:#3ddc97;
-    --accent-soft: rgba(61,220,151,0.16);
-    --accent-2:#e08a4a;
-    --accent-2-soft: rgba(224,138,74,0.16);
-    --line: rgba(234,242,234,0.09);
-    --warn:#ff6b5e;
+    --bg:#f1f4ef;
+    --panel: rgba(255,255,255,0.78);
+    --panel-line: rgba(15,29,22,0.10);
+    --ink:#101d17;
+    --ink-dim:#48584e;
+    --ink-faint:#76867b;
+    --accent:#0e9d68;
+    --accent-soft: rgba(14,157,104,0.14);
+    --accent-2:#c06a24;
+    --accent-2-soft: rgba(192,106,36,0.14);
+    --warn:#c8412f;
+    --warn-soft: rgba(200,65,47,0.14);
   }
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden;
@@ -28,35 +29,44 @@
   #scene{position:fixed;inset:0;}
   canvas{display:block;touch-action:none;}
 
-  .topbar{position:fixed;top:22px;left:26px;pointer-events:none;}
+  .topbar{position:fixed;top:22px;left:26px;pointer-events:none;display:flex;
+    align-items:baseline;gap:10px;}
   .wordmark{font-family:'Fraunces', Georgia, serif;font-weight:600;font-size:1.9rem;
     letter-spacing:-0.01em;color:var(--ink);font-style:italic;}
+  .version{font-family:'JetBrains Mono',monospace;font-size:0.72rem;font-weight:600;
+    color:var(--accent);letter-spacing:0.02em;}
   .subtitle{font-family:'JetBrains Mono',monospace;font-size:0.68rem;letter-spacing:0.14em;
     text-transform:uppercase;color:var(--ink-faint);margin-top:2px;}
 
   .hint{position:fixed;bottom:20px;left:26px;font-family:'JetBrains Mono',monospace;
     font-size:0.66rem;color:var(--ink-faint);letter-spacing:0.02em;line-height:1.6;
     pointer-events:none;}
-  .hint b{color:var(--ink-dim);font-weight:500;}
+  .hint b{color:var(--ink-dim);font-weight:600;}
 
   .reset-btn{position:fixed;bottom:20px;right:26px;font-family:'JetBrains Mono',monospace;
     font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-dim);
-    background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;
     padding:8px 14px;cursor:pointer;backdrop-filter:blur(10px);}
   .reset-btn:hover{color:var(--ink);border-color:var(--accent-soft);}
   .reset-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 
-  .dock{position:fixed;top:26px;right:26px;width:272px;max-height:calc(100% - 52px);
-    overflow-y:auto;background:var(--panel);backdrop-filter:blur(14px);
-    border:1px solid var(--line);border-radius:16px;padding:18px 18px 20px;
-    display:flex;flex-direction:column;gap:16px;}
-  .dock::-webkit-scrollbar{width:6px;}
-  .dock::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .panel-box{position:fixed;width:272px;max-height:calc(100% - 52px);overflow-y:auto;
+    background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--panel-line);
+    border-radius:16px;padding:18px 18px 20px;display:flex;flex-direction:column;gap:16px;
+    box-shadow:0 12px 32px rgba(16,29,23,0.08);}
+  .panel-box::-webkit-scrollbar{width:6px;}
+  .panel-box::-webkit-scrollbar-thumb{background:var(--panel-line);border-radius:3px;}
+
+  .dock{top:26px;right:26px;}
+  .inspector{top:26px;left:26px;margin-top:78px;display:none;}
+  .inspector.visible{display:flex;}
 
   .section-label{font-family:'JetBrains Mono',monospace;font-size:0.62rem;
     letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-faint);
-    margin-bottom:10px;}
-  .section{border-top:1px solid var(--line);padding-top:14px;}
+    margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;}
+  .section-label .tag{background:var(--accent-2-soft);color:var(--accent-2);padding:2px 7px;
+    border-radius:20px;letter-spacing:0.04em;}
+  .section{border-top:1px solid var(--panel-line);padding-top:14px;}
   .section:first-child{border-top:none;padding-top:0;}
 
   .status-grid{display:grid;grid-template-columns:1fr auto;row-gap:7px;column-gap:10px;
@@ -64,14 +74,13 @@
   .status-grid dt{color:var(--ink-faint);}
   .status-grid dd{margin:0;text-align:right;color:var(--ink);font-variant-numeric:tabular-nums;}
 
-  .segmented{display:flex;background:rgba(0,0,0,0.25);border-radius:9px;padding:3px;
-    border:1px solid var(--line);}
+  .segmented{display:flex;background:rgba(16,29,23,0.05);border-radius:9px;padding:3px;
+    border:1px solid var(--panel-line);}
   .segmented button{flex:1;background:none;border:none;color:var(--ink-faint);
     font-family:'IBM Plex Sans';font-size:0.7rem;font-weight:500;padding:8px 4px;
     border-radius:6px;cursor:pointer;transition:background .2s,color .2s;}
-  .segmented button.active{background:var(--accent-soft);color:var(--accent);}
+  .segmented button.active{background:var(--accent-soft);color:var(--accent);font-weight:600;}
   .segmented button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
-  .segmented.warn button.active{background:var(--accent-2-soft);color:var(--accent-2);}
 
   .dial-row{display:flex;gap:14px;justify-content:space-between;}
   .dial-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;
@@ -81,25 +90,51 @@
   .dial-label{font-size:0.62rem;letter-spacing:0.06em;text-transform:uppercase;
     color:var(--ink-faint);text-align:center;}
   .dial-value{font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:var(--ink);
-    font-variant-numeric:tabular-nums;}
+    font-variant-numeric:tabular-nums;font-weight:600;}
 
   .slider-block{margin-bottom:14px;}
   .slider-block:last-child{margin-bottom:0;}
   .slider-head{display:flex;justify-content:space-between;font-size:0.72rem;
     color:var(--ink-dim);margin-bottom:6px;}
   .slider-head span:last-child{font-family:'JetBrains Mono',monospace;color:var(--ink);
-    font-variant-numeric:tabular-nums;}
+    font-variant-numeric:tabular-nums;font-weight:600;}
   input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;
-    background:var(--line);border-radius:2px;outline:none;}
+    background:var(--panel-line);border-radius:2px;outline:none;}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
     border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 0 3px var(--accent-soft);}
   input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;border-radius:50%;
     background:var(--accent);cursor:pointer;box-shadow:0 0 0 3px var(--accent-soft);}
 
-  .note{font-size:0.68rem;color:var(--ink-faint);line-height:1.5;margin-top:2px;}
+  .field-row{display:flex;gap:8px;margin-bottom:10px;}
+  .field{flex:1;display:flex;flex-direction:column;gap:4px;}
+  .field label{font-size:0.62rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-faint);}
+  .field input[type=number], .field select{
+    font-family:'JetBrains Mono',monospace;font-size:0.76rem;color:var(--ink);
+    background:rgba(16,29,23,0.04);border:1px solid var(--panel-line);border-radius:7px;
+    padding:6px 7px;width:100%;font-variant-numeric:tabular-nums;}
+  .field select{font-family:'IBM Plex Sans';font-size:0.74rem;}
+  .field input:focus, .field select:focus{outline:2px solid var(--accent);outline-offset:1px;}
 
+  .btn-row{display:flex;gap:8px;margin-top:4px;}
+  .btn{flex:1;font-family:'IBM Plex Sans';font-size:0.72rem;font-weight:600;
+    padding:8px 6px;border-radius:8px;border:1px solid var(--panel-line);
+    background:rgba(16,29,23,0.03);color:var(--ink-dim);cursor:pointer;}
+  .btn:hover{border-color:var(--accent-soft);color:var(--ink);}
+  .btn.primary{background:var(--accent-soft);color:var(--accent);border-color:transparent;}
+  .btn.danger{background:var(--warn-soft);color:var(--warn);border-color:transparent;}
+  .btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+  .empty-note{font-size:0.72rem;color:var(--ink-faint);line-height:1.5;}
+  .note{font-size:0.68rem;color:var(--ink-faint);line-height:1.5;margin-top:2px;}
+  .close-x{position:absolute;top:14px;right:14px;background:none;border:none;color:var(--ink-faint);
+    font-size:1rem;cursor:pointer;line-height:1;}
+  .inspector{position:relative;}
+
+  @media (max-width: 900px){
+    .inspector{display:none !important;}
+  }
   @media (max-width: 640px){
-    .dock{width:calc(100% - 32px);left:16px;right:16px;top:auto;bottom:16px;max-height:44vh;}
+    .panel-box.dock{width:calc(100% - 32px);left:16px;right:16px;top:auto;bottom:16px;max-height:44vh;}
     .topbar{top:16px;left:16px;}
     .hint{display:none;}
   }
@@ -109,16 +144,18 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="subtitle">servo patches · not-wled console</div>
+  <div class="version" id="versionTag">v0.2.0</div>
 </div>
+<div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
 <div class="hint" id="hint">
-  <b>drag a patch</b> to re-arrange · <b>right-drag</b> pan · <b>scroll</b> zoom
+  <b>drag a patch</b> re-arrange · <b>shift-click</b> multi-select · <b>right-drag</b> pan ·
+  <b>scroll</b> zoom · <b>double-click</b> set rotation point
 </div>
 
 <button class="reset-btn" id="resetView">reset view</button>
 
-<div class="dock">
+<div class="panel-box dock">
   <div class="section">
     <div class="segmented" id="modeToggle">
       <button id="modeArrange" class="active">arrange</button>
@@ -130,7 +167,6 @@
     <div class="section-label">Rig</div>
     <dl class="status-grid">
       <dt>boards (patches)</dt><dd id="statBoards">–</dd>
-      <dt>channels / board</dt><dd id="statChPerBoard">–</dd>
       <dt>channels total</dt><dd id="statChTotal">–</dd>
       <dt>i2c range</dt><dd id="statAddr">–</dd>
     </dl>
@@ -142,6 +178,7 @@
       <div class="dial-wrap" id="dialPatches"></div>
       <div class="dial-wrap" id="dialCells"></div>
     </div>
+    <div class="note">cells/patch sets the default size for new patches, edit an existing one in the inspector</div>
     <div class="slider-block" style="margin-top:14px;">
       <div class="slider-head"><span>board gap</span><span id="valGap">0.35</span></div>
       <input type="range" id="sliderGap" min="0" max="120" value="35" step="5">
@@ -167,6 +204,8 @@
   </div>
 </div>
 
+<div class="panel-box inspector" id="inspector"></div>
+
 <script>
 (function(){
   "use strict";
@@ -174,9 +213,9 @@
   // ---------- scene ----------
   var container = document.getElementById('scene');
   var scene = new THREE.Scene();
-  var bgColor = 0x080c0a;
+  var bgColor = 0xf1f4ef;
   scene.background = new THREE.Color(bgColor);
-  scene.fog = new THREE.Fog(bgColor, 10, 30);
+  scene.fog = new THREE.Fog(bgColor, 11, 30);
 
   var camera = new THREE.PerspectiveCamera(40, innerWidth/innerHeight, 0.1, 100);
   var renderer = new THREE.WebGLRenderer({antialias:true});
@@ -184,22 +223,22 @@
   renderer.setSize(innerWidth, innerHeight);
   container.appendChild(renderer.domElement);
 
-  scene.add(new THREE.HemisphereLight(0x3a4a3f, 0x040604, 0.5));
-  var key = new THREE.DirectionalLight(0xbfe8d4, 1.0);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xd7ddd2, 0.85));
+  var key = new THREE.DirectionalLight(0xffffff, 0.7);
   key.position.set(4, 3, 6);
   scene.add(key);
-  var rim = new THREE.DirectionalLight(0xe08a4a, 0.35);
+  var rim = new THREE.DirectionalLight(0xc06a24, 0.25);
   rim.position.set(-5, -2, -3);
   scene.add(rim);
 
   var backWall = new THREE.Mesh(
     new THREE.PlaneGeometry(60, 40),
-    new THREE.MeshStandardMaterial({color:0x0a0f0c, roughness:1})
+    new THREE.MeshStandardMaterial({color:0xe7ebe3, roughness:1})
   );
   backWall.position.z = -0.3;
   scene.add(backWall);
 
-  // ---------- camera controls (orbit / pan / zoom, same as tuft console) ----------
+  // ---------- camera controls: orbit / pan / zoom / re-centerable pivot ----------
   var target = new THREE.Vector3(0, 0, 0);
   var spherical = {radius: 8.5, theta: 0.35, phi: Math.PI*0.44};
   var DEFAULT_SPH = {radius:8.5, theta:0.35, phi:Math.PI*0.44};
@@ -222,18 +261,49 @@
 
   renderer.domElement.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
+  function pickPatchAtEvent(e){
+    mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    var hits = raycaster.intersectObjects(hitMeshes(), true);
+    return hits[0] ? hits[0].object.userData.patch || hits[0].object.parent.userData.patch : null;
+  }
+
+  function hitMeshes(){
+    var arr = [];
+    for(var i=0;i<patches.length;i++){ arr.push(patches[i].hitMesh); }
+    return arr;
+  }
+
+  function pickPaddleAtEvent(e){
+    mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    var meshes = [];
+    for(var i=0;i<patches.length;i++){
+      for(var j=0;j<patches[i].paddles.length;j++){ meshes.push(patches[i].paddles[j].bodyMesh); }
+    }
+    var hits = raycaster.intersectObjects(meshes);
+    return hits[0] ? hits[0].object.userData.paddle : null;
+  }
+
   renderer.domElement.addEventListener('pointerdown', function(e){
     lastX = e.clientX; lastY = e.clientY;
     renderer.domElement.setPointerCapture(e.pointerId);
 
     if(state.mode === 'arrange' && e.button === 0 && !e.shiftKey){
-      mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
-      raycaster.setFromCamera(mouse, camera);
-      var hit = raycaster.intersectObjects(patches.map(function(p){return p.hitMesh;}))[0];
-      if(hit){
-        draggingPatch = hit.object.userData.patch;
+      var paddle = pickPaddleAtEvent(e);
+      if(paddle){ selectPaddle(paddle); return; }
+      var patch = pickPatchAtEvent(e);
+      if(patch){
+        selectPatch(patch, false);
+        draggingPatch = patch;
+        var z0 = patch.z;
+        dragPlane.set(new THREE.Vector3(0,0,1), -z0);
         return;
       }
+    }
+    if(state.mode === 'arrange' && e.button === 0 && e.shiftKey){
+      var patch2 = pickPatchAtEvent(e);
+      if(patch2){ selectPatch(patch2, true); return; }
     }
     dragMode = (e.button === 2 || e.shiftKey) ? 'pan' : 'orbit';
   });
@@ -243,23 +313,25 @@
       mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
       raycaster.setFromCamera(mouse, camera);
       raycaster.ray.intersectPlane(dragPlane, dragPoint);
-      var stepX = layout().stepX, stepY = layout().stepY;
-      var gx = Math.round(dragPoint.x/stepX), gy = Math.round(dragPoint.y/stepY);
-      if(!isOccupied(gx, gy, draggingPatch)){ draggingPatch.gx = gx; draggingPatch.gy = gy; }
+      if(!dragPoint) return;
+      var dx = dragPoint.x - draggingPatch.x, dy = dragPoint.y - draggingPatch.y;
+      var groupMembers = draggingPatch.groupId ? patches.filter(function(p){return p.groupId===draggingPatch.groupId;}) : [draggingPatch];
+      for(var i=0;i<groupMembers.length;i++){ groupMembers[i].x += dx; groupMembers[i].y += dy; }
+      if(inspectorTarget && inspectorTarget.kind==='patch') renderInspector();
       return;
     }
     if(!dragMode) return;
-    var dx = e.clientX - lastX, dy = e.clientY - lastY;
+    var mdx = e.clientX - lastX, mdy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
     if(dragMode === 'orbit'){
-      spherical.theta -= dx * 0.006;
-      spherical.phi = Math.min(Math.PI*0.49, Math.max(0.08, spherical.phi - dy * 0.006));
+      spherical.theta -= mdx * 0.006;
+      spherical.phi = Math.min(Math.PI*0.49, Math.max(0.08, spherical.phi - mdy * 0.006));
     } else {
       var panSpeed = spherical.radius * 0.0012;
       var right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
       var up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
-      target.addScaledVector(right, -dx*panSpeed);
-      target.addScaledVector(up, dy*panSpeed);
+      target.addScaledVector(right, -mdx*panSpeed);
+      target.addScaledVector(up, mdy*panSpeed);
     }
     applyCamera();
   });
@@ -274,6 +346,20 @@
     applyCamera();
   }, {passive:false});
 
+  // double-click sets a new orbit pivot, the thing that was missing before
+  renderer.domElement.addEventListener('dblclick', function(e){
+    mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    var meshes = hitMeshes().concat([backWall]);
+    var hits = raycaster.intersectObjects(meshes);
+    if(hits[0]){
+      var d = camera.position.distanceTo(hits[0].point);
+      target.copy(hits[0].point);
+      spherical.radius = Math.min(20, Math.max(3, d));
+      applyCamera();
+    }
+  });
+
   document.getElementById('resetView').addEventListener('click', function(){
     spherical.radius = DEFAULT_SPH.radius; spherical.theta = DEFAULT_SPH.theta; spherical.phi = DEFAULT_SPH.phi;
     target.copy(DEFAULT_TARGET);
@@ -286,22 +372,35 @@
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  // click on the wall (run mode) sets the ripple origin
+  // click on the wall (run mode) sets the ripple origin; click empty space (arrange) deselects
   var downPos = null;
   renderer.domElement.addEventListener('pointerdown', function(e){ downPos = {x:e.clientX, y:e.clientY}; });
   renderer.domElement.addEventListener('pointerup', function(e){
     if(!downPos) return;
     var moved = Math.hypot(e.clientX-downPos.x, e.clientY-downPos.y);
     downPos = null;
-    if(moved > 6 || state.mode !== 'run') return;
-    mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
-    raycaster.setFromCamera(mouse, camera);
-    var pt = new THREE.Vector3();
-    raycaster.ray.intersectPlane(dragPlane, pt);
-    if(pt){ state.rippleOrigin.set(pt.x, pt.y); }
+    if(moved > 6) return;
+    if(state.mode === 'run'){
+      mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
+      raycaster.setFromCamera(mouse, camera);
+      var pt = new THREE.Vector3();
+      var plane0 = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
+      raycaster.ray.intersectPlane(plane0, pt);
+      if(pt){ state.rippleOrigin.set(pt.x, pt.y); }
+    } else if(state.mode === 'arrange' && !e.shiftKey){
+      if(!pickPaddleAtEvent(e) && !pickPatchAtEvent(e)){ clearSelection(); }
+    }
   });
 
-  // ---------- patches / paddles ----------
+  // ---------- servo types ----------
+  var SERVO_TYPES = [
+    {id:'sg90', label:'SG90 · 9g plastic', footprint:1.0, torque:'1.6 kg·cm', range:'180°'},
+    {id:'mg90s', label:'MG90S · 13g metal gear', footprint:1.14, torque:'2.2 kg·cm', range:'180°'},
+    {id:'ds3218', label:'DS3218MG · 60g digital', footprint:1.6, torque:'20 kg·cm', range:'270°'},
+    {id:'fs90r', label:'FS90R · 9g continuous', footprint:1.0, torque:'1.3 kg·cm', range:'360° cont.'}
+  ];
+  function servoType(id){ for(var i=0;i<SERVO_TYPES.length;i++) if(SERVO_TYPES[i].id===id) return SERVO_TYPES[i]; return SERVO_TYPES[0]; }
+
   var CELL_PRESETS = [
     {cols:2, rows:2}, {cols:4, rows:2}, {cols:3, rows:3},
     {cols:4, rows:3}, {cols:4, rows:4}
@@ -309,118 +408,364 @@
   var CELL_SIZE = 0.42;
   var addrLabelCache = {};
 
-  function makeAddrSprite(text){
-    if(addrLabelCache[text]) return addrLabelCache[text].clone();
-    var c = document.createElement('canvas'); c.width=256; c.height=96;
+  function makeTextSprite(text, color, w, h, fontPx){
+    var key = text+color+w+h;
+    if(addrLabelCache[key]) return addrLabelCache[key].clone();
+    var c = document.createElement('canvas'); c.width=w; c.height=h;
     var ctx = c.getContext('2d');
-    ctx.font = '600 44px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#3ddc97';
+    ctx.font = '600 '+fontPx+'px "JetBrains Mono", monospace';
+    ctx.fillStyle = color;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(text, 128, 52);
+    ctx.fillText(text, w/2, h/2+2);
     var tex = new THREE.CanvasTexture(c);
     var mat = new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false});
     var sprite = new THREE.Sprite(mat);
-    sprite.scale.set(0.8, 0.3, 1);
-    addrLabelCache[text] = sprite;
+    sprite.scale.set(0.8*(w/256), 0.3*(h/96), 1);
+    addrLabelCache[key] = sprite;
     return sprite.clone();
   }
 
-  var paddleGeo = new THREE.BoxGeometry(0.16, 0.16, 0.02);
-  var paddleMat = new THREE.MeshStandardMaterial({color:0x2b332e, roughness:0.35, metalness:0.55, emissive:0x0a1210});
-  var frameMat = new THREE.MeshStandardMaterial({color:0x101712, roughness:0.9});
+  var bodyMat = new THREE.MeshStandardMaterial({color:0x2b332e, roughness:0.4, metalness:0.35});
+  var stickMat = new THREE.MeshStandardMaterial({color:0x8b988f, roughness:0.5, metalness:0.2});
+  var frameMat = new THREE.MeshStandardMaterial({color:0xdde3d8, roughness:0.95});
+  var frameSelMat = new THREE.MeshStandardMaterial({color:0xd8e9dd, roughness:0.95});
 
   var patches = [];
+  var multiSelect = [];
+  var inspectorTarget = null; // {kind:'patch'|'paddle', ref}
+  var nextGroupId = 1;
 
   function layout(){
     var preset = CELL_PRESETS[state.cellsIdx];
-    var gap = state.gap;
-    var pw = preset.cols*CELL_SIZE, ph = preset.rows*CELL_SIZE;
-    return {cols:preset.cols, rows:preset.rows, pw:pw, ph:ph, stepX: pw+gap, stepY: ph+gap};
+    return {cols:preset.cols, rows:preset.rows};
   }
 
   function isOccupied(gx, gy, exclude){
+    var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
     for(var i=0;i<patches.length;i++){
       var p = patches[i];
-      if(p!==exclude && p.gx===gx && p.gy===gy) return true;
+      if(p!==exclude && Math.round(p.x/stepX)===gx && Math.round(p.y/stepY)===gy) return true;
     }
     return false;
   }
 
-  function buildPatch(index, gx, gy){
-    var L = layout();
+  function buildPaddle(patch, r, c){
+    var pivot = new THREE.Group();
+    var lx = (-(patch.cols-1)/2 + c) * CELL_SIZE;
+    var ly = (-(patch.rows-1)/2 + r) * CELL_SIZE;
+    pivot.position.set(lx, ly, 0.03);
+
+    var body = new THREE.Mesh(new THREE.BoxGeometry(0.16,0.16,0.1), bodyMat.clone());
+    pivot.add(body);
+
+    var stickGroup = new THREE.Group();
+    pivot.add(stickGroup);
+    var stick = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.24,8), stickMat.clone());
+    stick.rotation.z = Math.PI/2;
+    stickGroup.add(stick);
+
+    var paddle = {
+      patch: patch, pivot: pivot, bodyMesh: body, stickGroup: stickGroup, stick: stick,
+      lx:lx, ly:ly, type: 'sg90', stickLength: 0.24, stickThickness: 0.02, stickOrientation: 0
+    };
+    body.userData.paddle = paddle;
+    applyPaddleGeometry(paddle);
+    return paddle;
+  }
+
+  function applyPaddleGeometry(pd){
+    var t = servoType(pd.type);
+    pd.bodyMesh.scale.setScalar(t.footprint);
+    pd.stick.geometry.dispose();
+    pd.stick.geometry = new THREE.CylinderGeometry(pd.stickThickness/2, pd.stickThickness/2, pd.stickLength, 8);
+    pd.stick.position.x = pd.stickLength/2;
+    pd.stickGroup.rotation.z = THREE.MathUtils.degToRad(pd.stickOrientation) + Math.PI/2;
+  }
+
+  function buildPatch(index, gx, gy, cols, rows){
+    var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
     var group = new THREE.Group();
-    group.userData.patch = null;
     scene.add(group);
 
-    var frame = new THREE.Mesh(new THREE.PlaneGeometry(L.pw+0.06, L.ph+0.06), frameMat);
+    var pw = cols*CELL_SIZE, ph = rows*CELL_SIZE;
+    var frame = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.06, ph+0.06), frameMat.clone());
     group.add(frame);
 
-    var paddles = [];
-    for(var r=0;r<L.rows;r++){
-      for(var c=0;c<L.cols;c++){
-        var pv = new THREE.Group();
-        var lx = (-(L.cols-1)/2 + c) * CELL_SIZE;
-        var ly = (-(L.rows-1)/2 + r) * CELL_SIZE;
-        pv.position.set(lx, ly, 0.03);
-        var mesh = new THREE.Mesh(paddleGeo, paddleMat.clone());
-        pv.add(mesh);
-        group.add(pv);
-        paddles.push({pivot:pv, mesh:mesh, lx:lx, ly:ly});
-      }
-    }
+    var outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(pw+0.1, ph+0.1)),
+      new THREE.LineBasicMaterial({color:0xc06a24})
+    );
+    outline.position.z = 0.001;
+    outline.visible = false;
+    group.add(outline);
 
-    var addr = makeAddrSprite('0x' + (0x40+index).toString(16));
-    addr.position.set(0, L.ph/2 + 0.28, 0.05);
+    var groupBadge = makeTextSprite('grp', '#c06a24', 160, 80, 40);
+    groupBadge.position.set(-(pw/2)+0.16, ph/2 + 0.12, 0.05);
+    groupBadge.visible = false;
+    group.add(groupBadge);
+
+    var patch = {
+      index:index, x: gx*stepX, y: gy*stepY, z: 0, rotationDeg: 0, cols:cols, rows:rows,
+      groupId:null, group:group, frame:frame, outline:outline, groupBadge:groupBadge, paddles:[]
+    };
+
+    for(var r=0;r<rows;r++){
+      for(var c=0;c<cols;c++){ patch.paddles.push(buildPaddle(patch, r, c)); }
+    }
+    for(var i=0;i<patch.paddles.length;i++){ group.add(patch.paddles[i].pivot); }
+
+    var addr = makeTextSprite('0x' + (0x40+index).toString(16), '#0e9d68', 256, 96, 44);
+    addr.position.set(0, ph/2 + 0.28, 0.05);
     group.add(addr);
+    patch.addrSprite = addr;
 
     var hitMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(L.pw+0.06, L.ph+0.06),
+      new THREE.PlaneGeometry(pw+0.06, ph+0.06),
       new THREE.MeshBasicMaterial({visible:false})
     );
     hitMesh.position.z = 0.04;
-    group.add(hitMesh);
-
-    var patch = {index:index, gx:gx, gy:gy, group:group, paddles:paddles, hitMesh:hitMesh};
     hitMesh.userData.patch = patch;
+    group.add(hitMesh);
+    patch.hitMesh = hitMesh;
+
     return patch;
   }
 
-  function rebuildPatches(count){
-    for(var i=0;i<patches.length;i++) scene.remove(patches[i].group);
-    patches = [];
-    var cols = Math.ceil(Math.sqrt(count));
-    for(var i2=0;i2<count;i2++){
-      var gx = (i2 % cols) - (cols-1)/2;
-      var gy = Math.floor(i2/cols);
-      patches.push(buildPatch(i2, Math.round(gx), Math.round(gy)));
+  function reflowNewPatchPosition(){
+    var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
+    for(var ring=0; ring<20; ring++){
+      for(var gy=-ring; gy<=ring; gy++){
+        for(var gx=-ring; gx<=ring; gx++){
+          if(!isOccupied(gx,gy)) return {x:gx*stepX, y:gy*stepY};
+        }
+      }
+    }
+    return {x:0,y:0};
+  }
+
+  function setPatchCount(count){
+    while(patches.length < count){
+      var L = layout();
+      var pos = reflowNewPatchPosition();
+      var stepX = 0.42*4+state.gap, stepY = 0.42*4+state.gap;
+      patches.push(buildPatch(patches.length, Math.round(pos.x/stepX), Math.round(pos.y/stepY), L.cols, L.rows));
+    }
+    while(patches.length > count){
+      var p = patches.pop();
+      scene.remove(p.group);
+      if(inspectorTarget && inspectorTarget.ref === p) clearSelection();
+      multiSelect = multiSelect.filter(function(mp){ return mp!==p; });
     }
     updateStats();
   }
 
-  function updateStats(){
-    var L = layout();
-    var perBoard = L.cols*L.rows;
-    document.getElementById('statBoards').textContent = patches.length;
-    document.getElementById('statChPerBoard').textContent = perBoard + ' / 16';
-    document.getElementById('statChTotal').textContent = perBoard*patches.length;
-    document.getElementById('statAddr').textContent =
-      '0x40–0x' + (0x40+Math.max(0,patches.length-1)).toString(16);
+  function rebuildPatchGeometry(patch, cols, rows){
+    var oldTypes = patch.paddles.map(function(p){ return {type:p.type, stickLength:p.stickLength, stickThickness:p.stickThickness, stickOrientation:p.stickOrientation}; });
+    for(var i=0;i<patch.paddles.length;i++){ patch.group.remove(patch.paddles[i].pivot); }
+    patch.group.remove(patch.frame); patch.group.remove(patch.outline); patch.group.remove(patch.addrSprite);
+    patch.group.remove(patch.hitMesh); patch.group.remove(patch.groupBadge);
+
+    var pw = cols*CELL_SIZE, ph = rows*CELL_SIZE;
+    patch.frame = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.06, ph+0.06), frameMat.clone());
+    patch.group.add(patch.frame);
+    patch.outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(pw+0.1, ph+0.1)),
+      new THREE.LineBasicMaterial({color:0xc06a24})
+    );
+    patch.outline.position.z = 0.001;
+    patch.group.add(patch.outline);
+    patch.groupBadge.position.set(-(pw/2)+0.16, ph/2 + 0.12, 0.05);
+    patch.group.add(patch.groupBadge);
+
+    patch.cols = cols; patch.rows = rows;
+    patch.paddles = [];
+    for(var r=0;r<rows;r++){
+      for(var c=0;c<cols;c++){
+        var pd = buildPaddle(patch, r, c);
+        var carry = oldTypes[r*cols+c] || oldTypes[0];
+        if(carry){ pd.type=carry.type; pd.stickLength=carry.stickLength; pd.stickThickness=carry.stickThickness; pd.stickOrientation=carry.stickOrientation; applyPaddleGeometry(pd); }
+        patch.paddles.push(pd);
+        patch.group.add(pd.pivot);
+      }
+    }
+    patch.addrSprite.position.set(0, ph/2+0.28, 0.05);
+    patch.group.add(patch.addrSprite);
+
+    var hitMesh = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.06, ph+0.06), new THREE.MeshBasicMaterial({visible:false}));
+    hitMesh.position.z = 0.04; hitMesh.userData.patch = patch;
+    patch.group.add(hitMesh);
+    patch.hitMesh = hitMesh;
+
+    updateStats();
   }
 
-  // ---------- state ----------
+  function updateStats(){
+    var total = 0;
+    for(var i=0;i<patches.length;i++){ total += patches[i].cols*patches[i].rows; }
+    document.getElementById('statBoards').textContent = patches.length;
+    document.getElementById('statChTotal').textContent = total;
+    document.getElementById('statAddr').textContent = patches.length ?
+      ('0x40–0x' + (0x40+Math.max(0,patches.length-1)).toString(16)) : '–';
+  }
+
+  // ---------- selection ----------
+  function clearSelection(){
+    multiSelect.forEach(function(p){ p.outline.visible = false; });
+    multiSelect = [];
+    inspectorTarget = null;
+    renderInspector();
+  }
+
+  function selectPatch(patch, additive){
+    if(additive){
+      var idx = multiSelect.indexOf(patch);
+      if(idx>=0){ multiSelect.splice(idx,1); patch.outline.visible = false; }
+      else { multiSelect.push(patch); patch.outline.visible = true; }
+    } else {
+      multiSelect.forEach(function(p){ p.outline.visible = false; });
+      multiSelect = [patch];
+      patch.outline.visible = true;
+    }
+    inspectorTarget = {kind:'patch', ref: multiSelect[multiSelect.length-1] || patch};
+    renderInspector();
+  }
+
+  function selectPaddle(paddle){
+    multiSelect.forEach(function(p){ p.outline.visible = false; });
+    multiSelect = [];
+    inspectorTarget = {kind:'paddle', ref: paddle};
+    renderInspector();
+  }
+
+  // ---------- inspector UI ----------
+  function el(tag, cls, html){ var e = document.createElement(tag); if(cls) e.className=cls; if(html!==undefined) e.innerHTML=html; return e; }
+
+  function renderInspector(){
+    var box = document.getElementById('inspector');
+    box.innerHTML = '';
+    if(!inspectorTarget){ box.classList.remove('visible'); return; }
+    box.classList.add('visible');
+
+    if(inspectorTarget.kind === 'paddle'){
+      var pd = inspectorTarget.ref;
+      box.appendChild(el('div','section-label','SERVO · patch 0x'+(0x40+pd.patch.index).toString(16)));
+
+      var sec1 = el('div','section');
+      var typeField = el('div','field');
+      typeField.appendChild(el('label',null,'servo type'));
+      var select = document.createElement('select');
+      SERVO_TYPES.forEach(function(t){
+        var o = document.createElement('option'); o.value=t.id; o.textContent=t.label;
+        if(t.id===pd.type) o.selected = true;
+        select.appendChild(o);
+      });
+      select.addEventListener('change', function(){ pd.type = select.value; applyPaddleGeometry(pd); renderInspector(); });
+      typeField.appendChild(select);
+      sec1.appendChild(typeField);
+      var t = servoType(pd.type);
+      sec1.appendChild(el('div','note', t.torque+' · '+t.range));
+      box.appendChild(sec1);
+
+      var sec2 = el('div','section');
+      sec2.appendChild(el('div','section-label','Stick'));
+      sec2.appendChild(makeSlider('length', pd.stickLength, 0.1, 0.6, 0.02, function(v){ pd.stickLength=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(2);}));
+      sec2.appendChild(makeSlider('thickness', pd.stickThickness, 0.01, 0.06, 0.005, function(v){ pd.stickThickness=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(3);}));
+      sec2.appendChild(makeSlider('orientation', pd.stickOrientation, 0, 359, 5, function(v){ pd.stickOrientation=v; applyPaddleGeometry(pd); }, function(v){return v+'°';}));
+      box.appendChild(sec2);
+      return;
+    }
+
+    // patch
+    var patch = inspectorTarget.ref;
+    var multi = multiSelect.length > 1;
+    box.appendChild(el('div','section-label', multi ? ('PANEL · '+multiSelect.length+' selected') : ('PANEL · 0x'+(0x40+patch.index).toString(16))));
+
+    var secPos = el('div','section');
+    secPos.appendChild(el('div','section-label','Position'));
+    var row = el('div','field-row');
+    ['x','y','z'].forEach(function(axis){
+      var f = el('div','field');
+      f.appendChild(el('label',null,axis));
+      var input = document.createElement('input');
+      input.type='number'; input.step='0.1'; input.value = patch[axis].toFixed(2);
+      input.addEventListener('input', function(){ patch[axis] = parseFloat(this.value)||0; });
+      f.appendChild(input);
+      row.appendChild(f);
+    });
+    secPos.appendChild(row);
+    box.appendChild(secPos);
+
+    var secOr = el('div','section');
+    secOr.appendChild(makeSlider('orientation', patch.rotationDeg, 0, 359, 5, function(v){ patch.rotationDeg=v; }, function(v){return v+'°';}));
+    var sizeField = el('div','field');
+    sizeField.appendChild(el('label',null,'size (cols × rows)'));
+    var sizeSelect = document.createElement('select');
+    CELL_PRESETS.forEach(function(p){
+      var o = document.createElement('option'); o.value = p.cols+'x'+p.rows; o.textContent = p.cols+' × '+p.rows+ ' ('+(p.cols*p.rows)+' ch)';
+      if(p.cols===patch.cols && p.rows===patch.rows) o.selected = true;
+      sizeSelect.appendChild(o);
+    });
+    sizeSelect.addEventListener('change', function(){
+      var parts = sizeSelect.value.split('x');
+      rebuildPatchGeometry(patch, parseInt(parts[0],10), parseInt(parts[1],10));
+    });
+    sizeField.appendChild(sizeSelect);
+    secOr.appendChild(sizeField);
+    box.appendChild(secOr);
+
+    var secGrp = el('div','section');
+    secGrp.appendChild(el('div','section-label','Group'));
+    var btnRow = el('div','btn-row');
+    var groupBtn = el('button','btn primary','group selected');
+    groupBtn.disabled = !multi;
+    groupBtn.addEventListener('click', function(){
+      var gid = nextGroupId++;
+      multiSelect.forEach(function(p){ p.groupId = gid; p.groupBadge.visible = true; });
+      renderInspector();
+    });
+    var ungroupBtn = el('button','btn danger','ungroup');
+    ungroupBtn.disabled = !patch.groupId;
+    ungroupBtn.addEventListener('click', function(){
+      var gid = patch.groupId;
+      patches.forEach(function(p){ if(p.groupId===gid){ p.groupId=null; p.groupBadge.visible=false; } });
+      renderInspector();
+    });
+    btnRow.appendChild(groupBtn); btnRow.appendChild(ungroupBtn);
+    secGrp.appendChild(btnRow);
+    secGrp.appendChild(el('div','note','shift-click patches to build a multi-select, grouped patches drag together'));
+    box.appendChild(secGrp);
+  }
+
+  function makeSlider(label, value, min, max, step, onChange, fmt){
+    var wrap = el('div','slider-block');
+    var head = el('div','slider-head', '<span>'+label+'</span><span></span>');
+    var valSpan = head.querySelector('span:last-child');
+    valSpan.textContent = fmt(value);
+    var input = document.createElement('input');
+    input.type='range'; input.min=min; input.max=max; input.step=step; input.value=value;
+    input.addEventListener('input', function(){
+      var v = parseFloat(input.value);
+      valSpan.textContent = fmt(v);
+      onChange(v);
+    });
+    wrap.appendChild(head); wrap.appendChild(input);
+    return wrap;
+  }
+
+  // ---------- global state ----------
   var state = {
     mode: 'arrange',
     patchCount: 4,
-    cellsIdx: 3, // 4x3
+    cellsIdx: 3,
     gap: 0.35,
     fx: 'ripple',
     speed: 1.0,
     scale: 0.9,
     rippleOrigin: new THREE.Vector2(0,0)
   };
-  rebuildPatches(state.patchCount);
+  setPatchCount(state.patchCount);
 
-  // ---------- dials (same widget as tuft console) ----------
+  // ---------- dock dials ----------
   function makeDial(mount, opts){
     var size = 84, cx = size/2, cy = size/2, r = 32;
     var sweep = Math.PI * 1.5;
@@ -439,14 +784,14 @@
 
     var track = document.createElementNS('http://www.w3.org/2000/svg','path');
     track.setAttribute('d', arcPath(start, start+sweep));
-    track.setAttribute('stroke', 'rgba(234,242,234,0.10)');
+    track.setAttribute('stroke', 'rgba(16,29,23,0.12)');
     track.setAttribute('stroke-width', 6);
     track.setAttribute('fill', 'none');
     track.setAttribute('stroke-linecap','round');
     svg.appendChild(track);
 
     var fill = document.createElementNS('http://www.w3.org/2000/svg','path');
-    fill.setAttribute('stroke', opts.color || '#3ddc97');
+    fill.setAttribute('stroke', opts.color || '#0e9d68');
     fill.setAttribute('stroke-width', 6);
     fill.setAttribute('fill', 'none');
     fill.setAttribute('stroke-linecap','round');
@@ -454,7 +799,7 @@
 
     var knob = document.createElementNS('http://www.w3.org/2000/svg','circle');
     knob.setAttribute('r', 4);
-    knob.setAttribute('fill', opts.color || '#3ddc97');
+    knob.setAttribute('fill', opts.color || '#0e9d68');
     svg.appendChild(knob);
 
     var wrap = document.createElement('div');
@@ -467,7 +812,7 @@
     wrap.appendChild(value); wrap.appendChild(label);
     mount.appendChild(wrap);
 
-    var idx = opts.startIndex !== undefined ? opts.startIndex : opts.value;
+    var idx = opts.value;
     function render(){
       var t = (idx - opts.min) / (opts.max - opts.min);
       fill.setAttribute('d', arcPath(start, start + sweep*t));
@@ -500,22 +845,21 @@
   }
 
   makeDial(document.getElementById('dialPatches'), {
-    label:'patches', min:1, max:9, step:1, value:state.patchCount, color:'#3ddc97',
+    label:'patches', min:1, max:9, step:1, value:state.patchCount, color:'#0e9d68',
     format:function(v){ return v; },
-    onChange:function(v){ state.patchCount = v; rebuildPatches(v); }
+    onChange:function(v){ state.patchCount = v; setPatchCount(v); }
   });
 
   makeDial(document.getElementById('dialCells'), {
-    label:'cells/patch', min:0, max:CELL_PRESETS.length-1, step:1, value:state.cellsIdx, color:'#e08a4a',
+    label:'cells/patch', min:0, max:CELL_PRESETS.length-1, step:1, value:state.cellsIdx, color:'#c06a24',
     format:function(v){ var p = CELL_PRESETS[v]; return p.cols+'×'+p.rows; },
-    onChange:function(v){ state.cellsIdx = v; rebuildPatches(state.patchCount); }
+    onChange:function(v){ state.cellsIdx = v; }
   });
 
-  // ---------- sliders ----------
+  // ---------- sliders / toggles ----------
   document.getElementById('sliderGap').addEventListener('input', function(e){
     state.gap = e.target.value/100;
     document.getElementById('valGap').textContent = state.gap.toFixed(2);
-    rebuildPatches(state.patchCount);
   });
   document.getElementById('sliderSpeed').addEventListener('input', function(e){
     state.speed = e.target.value/100;
@@ -542,14 +886,17 @@
     state.mode='arrange';
     document.getElementById('modeArrange').classList.add('active');
     document.getElementById('modeRun').classList.remove('active');
-    document.getElementById('hint').innerHTML = '<b>drag a patch</b> to re-arrange · <b>right-drag</b> pan · <b>scroll</b> zoom';
+    document.getElementById('hint').innerHTML = '<b>drag a patch</b> re-arrange · <b>shift-click</b> multi-select · <b>right-drag</b> pan · <b>scroll</b> zoom · <b>double-click</b> set rotation point';
   });
   document.getElementById('modeRun').addEventListener('click', function(){
     state.mode='run';
+    clearSelection();
     document.getElementById('modeRun').classList.add('active');
     document.getElementById('modeArrange').classList.remove('active');
-    document.getElementById('hint').innerHTML = '<b>click the wall</b> to move the ripple · <b>right-drag</b> pan · <b>scroll</b> zoom';
+    document.getElementById('hint').innerHTML = '<b>click the wall</b> move the ripple · <b>right-drag</b> pan · <b>scroll</b> zoom · <b>double-click</b> set rotation point';
   });
+
+  renderInspector();
 
   // ---------- animate ----------
   var clock = new THREE.Clock();
@@ -564,22 +911,21 @@
     }
   }
 
+  var tmpV = new THREE.Vector3();
   function animate(){
     requestAnimationFrame(animate);
     var t = clock.getElapsedTime();
-    var L = layout();
 
     for(var i=0;i<patches.length;i++){
       var p = patches[i];
-      var wcx = p.gx*L.stepX, wcy = p.gy*L.stepY;
-      p.group.position.set(wcx, wcy, 0);
+      p.group.position.set(p.x, p.y, p.z);
+      p.group.rotation.z = THREE.MathUtils.degToRad(p.rotationDeg);
       for(var j=0;j<p.paddles.length;j++){
         var pd = p.paddles[j];
-        var wx = wcx + pd.lx, wy = wcy + pd.ly;
-        var v = effectValue(wx, wy, t);
+        tmpV.set(pd.lx, pd.ly, 0).applyEuler(new THREE.Euler(0,0,p.group.rotation.z));
+        var wx = p.x + tmpV.x, wy = p.y + tmpV.y;
+        var v = state.mode==='run' ? effectValue(wx, wy, t) : Math.sin(t*0.4 + i*0.4 + j*0.15)*0.15;
         pd.pivot.rotation.y = v * 0.85;
-        var glow = (v*0.5+0.5) * 0.5;
-        pd.mesh.material.emissive.setRGB(0.04+glow*0.02, 0.07+glow*0.35, 0.06+glow*0.25);
       }
     }
     renderer.render(scene, camera);
