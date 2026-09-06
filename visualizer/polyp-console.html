@@ -144,7 +144,7 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="version" id="versionTag">v0.2.0</div>
+  <div class="version" id="versionTag">v0.3.0</div>
 </div>
 <div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
@@ -240,8 +240,8 @@
 
   // ---------- camera controls: orbit / pan / zoom / re-centerable pivot ----------
   var target = new THREE.Vector3(0, 0, 0);
-  var spherical = {radius: 8.5, theta: 0.35, phi: Math.PI*0.44};
-  var DEFAULT_SPH = {radius:8.5, theta:0.35, phi:Math.PI*0.44};
+  var spherical = {radius: 2.4, theta: 0.35, phi: Math.PI*0.44};
+  var DEFAULT_SPH = {radius:2.4, theta:0.35, phi:Math.PI*0.44};
   var DEFAULT_TARGET = target.clone();
 
   function applyCamera(){
@@ -402,7 +402,7 @@
   function servoType(id){ for(var i=0;i<SERVO_TYPES.length;i++) if(SERVO_TYPES[i].id===id) return SERVO_TYPES[i]; return SERVO_TYPES[0]; }
 
   var CELL_PRESETS = [
-    {cols:2, rows:2}, {cols:4, rows:2}, {cols:3, rows:3},
+    {cols:1, rows:1}, {cols:2, rows:2}, {cols:4, rows:2}, {cols:3, rows:3},
     {cols:4, rows:3}, {cols:4, rows:4}
   ];
   var CELL_SIZE = 0.42;
@@ -450,6 +450,7 @@
   }
 
   function buildPaddle(patch, r, c){
+    // pivot never rotates: it is the servo's fixed mounting point on the panel.
     var pivot = new THREE.Group();
     var lx = (-(patch.cols-1)/2 + c) * CELL_SIZE;
     var ly = (-(patch.rows-1)/2 + r) * CELL_SIZE;
@@ -458,14 +459,24 @@
     var body = new THREE.Mesh(new THREE.BoxGeometry(0.16,0.16,0.1), bodyMat.clone());
     pivot.add(body);
 
+    // wiperPivot is the only thing that rotates: the output shaft, held slightly
+    // off the body's face so the sweep reads clearly, like a wiper arm's pivot.
+    var wiperPivot = new THREE.Group();
+    wiperPivot.position.set(0, 0, 0.09);
+    pivot.add(wiperPivot);
+
     var stickGroup = new THREE.Group();
-    pivot.add(stickGroup);
+    wiperPivot.add(stickGroup);
     var stick = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.24,8), stickMat.clone());
     stick.rotation.z = Math.PI/2;
     stickGroup.add(stick);
 
+    var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.028,0.03,12), stickMat.clone());
+    hub.rotation.x = Math.PI/2;
+    wiperPivot.add(hub);
+
     var paddle = {
-      patch: patch, pivot: pivot, bodyMesh: body, stickGroup: stickGroup, stick: stick,
+      patch: patch, pivot: pivot, bodyMesh: body, wiperPivot: wiperPivot, stickGroup: stickGroup, stick: stick,
       lx:lx, ly:ly, type: 'sg90', stickLength: 0.24, stickThickness: 0.02, stickOrientation: 0
     };
     body.userData.paddle = paddle;
@@ -479,7 +490,7 @@
     pd.stick.geometry.dispose();
     pd.stick.geometry = new THREE.CylinderGeometry(pd.stickThickness/2, pd.stickThickness/2, pd.stickLength, 8);
     pd.stick.position.x = pd.stickLength/2;
-    pd.stickGroup.rotation.z = THREE.MathUtils.degToRad(pd.stickOrientation) + Math.PI/2;
+    pd.stickGroup.rotation.z = THREE.MathUtils.degToRad(pd.stickOrientation);
   }
 
   function buildPatch(index, gx, gy, cols, rows){
@@ -755,8 +766,8 @@
   // ---------- global state ----------
   var state = {
     mode: 'arrange',
-    patchCount: 4,
-    cellsIdx: 3,
+    patchCount: 1,
+    cellsIdx: 0,
     gap: 0.35,
     fx: 'ripple',
     speed: 1.0,
@@ -925,7 +936,7 @@
         tmpV.set(pd.lx, pd.ly, 0).applyEuler(new THREE.Euler(0,0,p.group.rotation.z));
         var wx = p.x + tmpV.x, wy = p.y + tmpV.y;
         var v = state.mode==='run' ? effectValue(wx, wy, t) : Math.sin(t*0.4 + i*0.4 + j*0.15)*0.15;
-        pd.pivot.rotation.y = v * 0.85;
+        pd.wiperPivot.rotation.z = v * 0.85; // windscreen-wiper sweep, body stays put
       }
     }
     renderer.render(scene, camera);
