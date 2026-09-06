@@ -144,7 +144,7 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="version" id="versionTag">v0.5.0</div>
+  <div class="version" id="versionTag">v0.6.0</div>
 </div>
 <div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
@@ -441,6 +441,9 @@
   var multiSelect = [];
   var inspectorTarget = null; // {kind:'patch'|'paddle', ref}
   var nextGroupId = 1;
+  // the locked-in servo settings: every new servo is born with these, and
+  // "match all servos" pushes them onto every servo that already exists.
+  var defaultServoTemplate = {type:'sg90', stickLength:2.0, stickThickness:0.15, stickOrientation:0, mountTilt:0, mountPan:0};
 
   function layout(){
     var preset = CELL_PRESETS[state.cellsIdx];
@@ -484,8 +487,9 @@
 
     var paddle = {
       patch: patch, pivot: pivot, bodyMesh: body, wiperPivot: wiperPivot, stickGroup: stickGroup, stick: stick,
-      lx:lx, ly:ly, type: 'sg90', stickLength: 2.0, stickThickness: 0.15, stickOrientation: 0,
-      mountTilt: 0, mountPan: 0
+      lx:lx, ly:ly, type: defaultServoTemplate.type, stickLength: defaultServoTemplate.stickLength,
+      stickThickness: defaultServoTemplate.stickThickness, stickOrientation: defaultServoTemplate.stickOrientation,
+      mountTilt: defaultServoTemplate.mountTilt, mountPan: defaultServoTemplate.mountPan
     };
     body.userData.paddle = paddle;
     applyPaddleGeometry(paddle);
@@ -706,6 +710,36 @@
       sec2.appendChild(makeSlider('thickness', pd.stickThickness, 0.05, 0.4, 0.05, function(v){ pd.stickThickness=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(2)+' cm';}));
       sec2.appendChild(makeSlider('orientation', pd.stickOrientation, 0, 359, 5, function(v){ pd.stickOrientation=v; applyPaddleGeometry(pd); }, function(v){return v+'°';}));
       box.appendChild(sec2);
+
+      var totalServos = 0;
+      for(var pi=0;pi<patches.length;pi++){ totalServos += patches[pi].paddles.length; }
+      var secLock = el('div','section');
+      secLock.appendChild(el('div','section-label','Match'));
+      var lockBtn = el('button','btn primary','lock this in, apply to all '+totalServos+' servos');
+      lockBtn.addEventListener('click', function(){
+        defaultServoTemplate = {
+          type: pd.type, stickLength: pd.stickLength, stickThickness: pd.stickThickness,
+          stickOrientation: pd.stickOrientation, mountTilt: pd.mountTilt, mountPan: pd.mountPan
+        };
+        for(var pj=0;pj<patches.length;pj++){
+          var pp = patches[pj].paddles;
+          for(var pk=0;pk<pp.length;pk++){
+            if(pp[pk]===pd) continue;
+            pp[pk].type = defaultServoTemplate.type;
+            pp[pk].stickLength = defaultServoTemplate.stickLength;
+            pp[pk].stickThickness = defaultServoTemplate.stickThickness;
+            pp[pk].stickOrientation = defaultServoTemplate.stickOrientation;
+            pp[pk].mountTilt = defaultServoTemplate.mountTilt;
+            pp[pk].mountPan = defaultServoTemplate.mountPan;
+            applyPaddleGeometry(pp[pk]);
+            applyMountRotation(pp[pk]);
+          }
+        }
+        renderInspector();
+      });
+      secLock.appendChild(lockBtn);
+      secLock.appendChild(el('div','note','sets this as the default too, so new patches and new servos are born matching it'));
+      box.appendChild(secLock);
       return;
     }
 
