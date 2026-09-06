@@ -144,7 +144,7 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="version" id="versionTag">v0.6.0</div>
+  <div class="version" id="versionTag">v0.7.0</div>
 </div>
 <div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
@@ -164,6 +164,16 @@
   </div>
 
   <div class="section">
+    <div class="section-label">Aspect</div>
+    <div class="segmented" id="aspectToggle">
+      <button data-aspect="wall" class="active">wall</button>
+      <button data-aspect="floor">floor</button>
+      <button data-aspect="roof">roof</button>
+    </div>
+    <div class="note" id="aspectNote">facing you, shafts point out toward the viewer</div>
+  </div>
+
+  <div class="section">
     <div class="section-label">Rig</div>
     <dl class="status-grid">
       <dt>boards (patches)</dt><dd id="statBoards">–</dd>
@@ -180,7 +190,7 @@
     </div>
     <div class="note">cells/patch sets the default size for new patches, edit an existing one in the inspector</div>
     <div class="slider-block" style="margin-top:14px;">
-      <div class="slider-head"><span>board gap</span><span id="valGap">1.2 cm</span></div>
+      <div class="slider-head"><span>panel spacing</span><span id="valGap">1.2 cm</span></div>
       <input type="range" id="sliderGap" min="0" max="600" value="120" step="10">
     </div>
   </div>
@@ -241,6 +251,21 @@
   raycastFloor.position.z = -60;
   scene.add(raycastFloor);
 
+  // rigRoot holds every patch. Rotating it is how wall/floor/roof aspect works,
+  // lights/camera/raycastFloor stay fixed in world space regardless of aspect.
+  var rigRoot = new THREE.Group();
+  scene.add(rigRoot);
+  var ASPECTS = {
+    wall:  {rot:[0,0,0],              label:'facing you, shafts point out toward the viewer'},
+    floor: {rot:[-Math.PI/2,0,0],     label:'lying flat, shafts point straight up'},
+    roof:  {rot:[Math.PI/2,0,0],      label:'overhead, shafts point straight down like Tuft'}
+  };
+  function setAspect(name){
+    var a = ASPECTS[name];
+    rigRoot.rotation.set(a.rot[0], a.rot[1], a.rot[2]);
+    document.getElementById('aspectNote').textContent = a.label;
+  }
+
   // ---------- camera controls: orbit / pan / zoom / re-centerable pivot ----------
   var target = new THREE.Vector3(0, 0, 0);
   var spherical = {radius: 14, theta: 0.35, phi: Math.PI*0.44};
@@ -259,8 +284,21 @@
   var dragMode = null, lastX=0, lastY=0, draggingPatch = null;
   var raycaster = new THREE.Raycaster();
   var mouse = new THREE.Vector2();
-  var dragPlane = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
-  var dragPoint = new THREE.Vector3();
+
+  // rigRoot can be rotated (wall/floor/roof aspect), so any click that needs a
+  // point "on the rig's own plane" has to build that plane in world space from
+  // rigRoot's current orientation, then convert the hit back to rig-local
+  // coordinates, patch.x/y/z are always rig-local, never world-space.
+  function rigLocalPointFromEvent(e, localZ){
+    mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    var worldNormal = new THREE.Vector3(0,0,1).applyQuaternion(rigRoot.quaternion).normalize();
+    var worldPoint = rigRoot.localToWorld(new THREE.Vector3(0,0,localZ));
+    var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(worldNormal, worldPoint);
+    var hit = new THREE.Vector3();
+    var ok = raycaster.ray.intersectPlane(plane, hit);
+    return ok ? rigRoot.worldToLocal(hit) : null;
+  }
 
   renderer.domElement.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
@@ -299,8 +337,6 @@
       if(patch){
         selectPatch(patch, false);
         draggingPatch = patch;
-        var z0 = patch.z;
-        dragPlane.set(new THREE.Vector3(0,0,1), -z0);
         return;
       }
     }
@@ -313,11 +349,9 @@
 
   renderer.domElement.addEventListener('pointermove', function(e){
     if(draggingPatch){
-      mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
-      raycaster.setFromCamera(mouse, camera);
-      raycaster.ray.intersectPlane(dragPlane, dragPoint);
-      if(!dragPoint) return;
-      var dx = dragPoint.x - draggingPatch.x, dy = dragPoint.y - draggingPatch.y;
+      var localPoint = rigLocalPointFromEvent(e, draggingPatch.z);
+      if(!localPoint) return;
+      var dx = localPoint.x - draggingPatch.x, dy = localPoint.y - draggingPatch.y;
       var groupMembers = draggingPatch.groupId ? patches.filter(function(p){return p.groupId===draggingPatch.groupId;}) : [draggingPatch];
       for(var i=0;i<groupMembers.length;i++){ groupMembers[i].x += dx; groupMembers[i].y += dy; }
       if(inspectorTarget && inspectorTarget.kind==='patch') renderInspector();
@@ -384,11 +418,7 @@
     downPos = null;
     if(moved > 6) return;
     if(state.mode === 'run'){
-      mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
-      raycaster.setFromCamera(mouse, camera);
-      var pt = new THREE.Vector3();
-      var plane0 = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
-      raycaster.ray.intersectPlane(plane0, pt);
+      var pt = rigLocalPointFromEvent(e, 0);
       if(pt){ state.rippleOrigin.set(pt.x, pt.y); }
     } else if(state.mode === 'arrange' && !e.shiftKey){
       if(!pickPaddleAtEvent(e) && !pickPatchAtEvent(e)){ clearSelection(); }
@@ -516,7 +546,7 @@
   function buildPatch(index, gx, gy, cols, rows){
     var stepX = CELL_SIZE*4+state.gap, stepY = CELL_SIZE*4+state.gap;
     var group = new THREE.Group();
-    scene.add(group);
+    rigRoot.add(group);
 
     var pw = cols*CELL_SIZE, ph = rows*CELL_SIZE;
     var frame = new THREE.Mesh(new THREE.PlaneGeometry(pw+0.4, ph+0.4), frameMat.clone());
@@ -583,7 +613,7 @@
     }
     while(patches.length > count){
       var p = patches.pop();
-      scene.remove(p.group);
+      rigRoot.remove(p.group);
       if(inspectorTarget && inspectorTarget.ref === p) clearSelection();
       multiSelect = multiSelect.filter(function(mp){ return mp!==p; });
     }
@@ -832,6 +862,7 @@
     rippleOrigin: new THREE.Vector2(0,0)
   };
   setPatchCount(state.patchCount);
+  var lastStep = CELL_SIZE*4 + state.gap;
 
   // ---------- dock dials ----------
   function makeDial(mount, opts){
@@ -928,6 +959,16 @@
   document.getElementById('sliderGap').addEventListener('input', function(e){
     state.gap = e.target.value/100;
     document.getElementById('valGap').textContent = state.gap.toFixed(1)+' cm';
+    // this used to only affect where brand-new patches land, existing ones never
+    // moved when the slider changed. Now it rescales every patch's position by
+    // the ratio of new-to-old spacing, so it actually spaces the panels apart.
+    var newStep = CELL_SIZE*4 + state.gap;
+    var ratio = newStep / lastStep;
+    if(isFinite(ratio) && ratio > 0){
+      for(var i=0;i<patches.length;i++){ patches[i].x *= ratio; patches[i].y *= ratio; }
+      if(inspectorTarget) renderInspector();
+    }
+    lastStep = newStep;
   });
   document.getElementById('sliderSpeed').addEventListener('input', function(e){
     state.speed = e.target.value/100;
@@ -936,6 +977,12 @@
   document.getElementById('sliderScale').addEventListener('input', function(e){
     state.scale = e.target.value/100;
     document.getElementById('valScale').textContent = state.scale.toFixed(2);
+  });
+
+  document.getElementById('aspectToggle').addEventListener('click', function(e){
+    var btn = e.target.closest('button'); if(!btn) return;
+    setAspect(btn.dataset.aspect);
+    document.querySelectorAll('#aspectToggle button').forEach(function(b){ b.classList.toggle('active', b===btn); });
   });
 
   var fxNotes = {
