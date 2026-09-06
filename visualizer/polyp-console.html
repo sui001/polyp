@@ -144,7 +144,7 @@
 
 <div class="topbar">
   <div class="wordmark">Polyp</div>
-  <div class="version" id="versionTag">v0.4.0</div>
+  <div class="version" id="versionTag">v0.5.0</div>
 </div>
 <div class="topbar" style="top:52px;"><div class="subtitle">servo patches · not-wled console</div></div>
 
@@ -215,9 +215,10 @@
   var scene = new THREE.Scene();
   var bgColor = 0xf1f4ef;
   scene.background = new THREE.Color(bgColor);
-  scene.fog = new THREE.Fog(bgColor, 11, 30);
+  // no fog: at real-world cm scale with a horn up to a metre long, fog distances
+  // tuned for a tiny scene just turned every zoom-out into a wall of bgColor haze.
 
-  var camera = new THREE.PerspectiveCamera(40, innerWidth/innerHeight, 0.1, 100);
+  var camera = new THREE.PerspectiveCamera(40, innerWidth/innerHeight, 0.05, 1000);
   var renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
@@ -231,12 +232,14 @@
   rim.position.set(-5, -2, -3);
   scene.add(rim);
 
-  var backWall = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 40),
-    new THREE.MeshStandardMaterial({color:0xe7ebe3, roughness:1})
+  // invisible far plane, exists only so double-click has something to hit when
+  // re-centering the orbit pivot over open space, no rendered backdrop plane.
+  var raycastFloor = new THREE.Mesh(
+    new THREE.PlaneGeometry(4000, 4000),
+    new THREE.MeshBasicMaterial({visible:false})
   );
-  backWall.position.z = -0.3;
-  scene.add(backWall);
+  raycastFloor.position.z = -60;
+  scene.add(raycastFloor);
 
   // ---------- camera controls: orbit / pan / zoom / re-centerable pivot ----------
   var target = new THREE.Vector3(0, 0, 0);
@@ -342,7 +345,7 @@
 
   renderer.domElement.addEventListener('wheel', function(e){
     e.preventDefault();
-    spherical.radius = Math.min(60, Math.max(1.5, spherical.radius * (1 + e.deltaY*0.001)));
+    spherical.radius = Math.min(250, Math.max(1.5, spherical.radius * (1 + e.deltaY*0.001)));
     applyCamera();
   }, {passive:false});
 
@@ -350,12 +353,12 @@
   renderer.domElement.addEventListener('dblclick', function(e){
     mouse.x = (e.clientX/innerWidth)*2-1; mouse.y = -(e.clientY/innerHeight)*2+1;
     raycaster.setFromCamera(mouse, camera);
-    var meshes = hitMeshes().concat([backWall]);
+    var meshes = hitMeshes().concat([raycastFloor]);
     var hits = raycaster.intersectObjects(meshes);
     if(hits[0]){
       var d = camera.position.distanceTo(hits[0].point);
       target.copy(hits[0].point);
-      spherical.radius = Math.min(60, Math.max(1.5, d));
+      spherical.radius = Math.min(250, Math.max(1.5, d));
       applyCamera();
     }
   });
@@ -431,7 +434,7 @@
 
   var bodyMat = new THREE.MeshStandardMaterial({color:0x2b332e, roughness:0.4, metalness:0.35});
   var stickMat = new THREE.MeshStandardMaterial({color:0x8b988f, roughness:0.5, metalness:0.2});
-  var frameMat = new THREE.MeshStandardMaterial({color:0xdde3d8, roughness:0.95});
+  var frameMat = new THREE.MeshStandardMaterial({color:0xe9ece5, roughness:0.95});
   var frameSelMat = new THREE.MeshStandardMaterial({color:0xd8e9dd, roughness:0.95});
 
   var patches = [];
@@ -481,11 +484,20 @@
 
     var paddle = {
       patch: patch, pivot: pivot, bodyMesh: body, wiperPivot: wiperPivot, stickGroup: stickGroup, stick: stick,
-      lx:lx, ly:ly, type: 'sg90', stickLength: 2.0, stickThickness: 0.15, stickOrientation: 0
+      lx:lx, ly:ly, type: 'sg90', stickLength: 2.0, stickThickness: 0.15, stickOrientation: 0,
+      mountTilt: 0, mountPan: 0
     };
     body.userData.paddle = paddle;
     applyPaddleGeometry(paddle);
+    applyMountRotation(paddle);
     return paddle;
+  }
+
+  // rotates the whole servo (case + shaft + horn) on its mount, this is how you
+  // point the horn somewhere the in-plane "stick orientation" alone can't reach.
+  function applyMountRotation(pd){
+    pd.pivot.rotation.x = THREE.MathUtils.degToRad(pd.mountTilt);
+    pd.pivot.rotation.y = THREE.MathUtils.degToRad(pd.mountPan);
   }
 
   function applyPaddleGeometry(pd){
@@ -575,7 +587,7 @@
   }
 
   function rebuildPatchGeometry(patch, cols, rows){
-    var oldTypes = patch.paddles.map(function(p){ return {type:p.type, stickLength:p.stickLength, stickThickness:p.stickThickness, stickOrientation:p.stickOrientation}; });
+    var oldTypes = patch.paddles.map(function(p){ return {type:p.type, stickLength:p.stickLength, stickThickness:p.stickThickness, stickOrientation:p.stickOrientation, mountTilt:p.mountTilt, mountPan:p.mountPan}; });
     for(var i=0;i<patch.paddles.length;i++){ patch.group.remove(patch.paddles[i].pivot); }
     patch.group.remove(patch.frame); patch.group.remove(patch.outline); patch.group.remove(patch.addrSprite);
     patch.group.remove(patch.hitMesh); patch.group.remove(patch.groupBadge);
@@ -598,7 +610,7 @@
       for(var c=0;c<cols;c++){
         var pd = buildPaddle(patch, r, c);
         var carry = oldTypes[r*cols+c] || oldTypes[0];
-        if(carry){ pd.type=carry.type; pd.stickLength=carry.stickLength; pd.stickThickness=carry.stickThickness; pd.stickOrientation=carry.stickOrientation; applyPaddleGeometry(pd); }
+        if(carry){ pd.type=carry.type; pd.stickLength=carry.stickLength; pd.stickThickness=carry.stickThickness; pd.stickOrientation=carry.stickOrientation; pd.mountTilt=carry.mountTilt||0; pd.mountPan=carry.mountPan||0; applyPaddleGeometry(pd); applyMountRotation(pd); }
         patch.paddles.push(pd);
         patch.group.add(pd.pivot);
       }
@@ -681,9 +693,16 @@
       sec1.appendChild(el('div','note', t.torque+' · '+t.range));
       box.appendChild(sec1);
 
+      var secMount = el('div','section');
+      secMount.appendChild(el('div','section-label','Mount'));
+      secMount.appendChild(makeSlider('tilt', pd.mountTilt, -180, 180, 5, function(v){ pd.mountTilt=v; applyMountRotation(pd); }, function(v){return v+'°';}));
+      secMount.appendChild(makeSlider('pan', pd.mountPan, -180, 180, 5, function(v){ pd.mountPan=v; applyMountRotation(pd); }, function(v){return v+'°';}));
+      secMount.appendChild(el('div','note','rotates the whole servo on its mount, use this to point the case (and the horn with it) any direction, not just spin the horn in place'));
+      box.appendChild(secMount);
+
       var sec2 = el('div','section');
       sec2.appendChild(el('div','section-label','Stick'));
-      sec2.appendChild(makeSlider('length', pd.stickLength, 0.5, 4, 0.1, function(v){ pd.stickLength=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(1)+' cm';}));
+      sec2.appendChild(makeSlider('length', pd.stickLength, 0.5, 100, 0.5, function(v){ pd.stickLength=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(1)+' cm';}));
       sec2.appendChild(makeSlider('thickness', pd.stickThickness, 0.05, 0.4, 0.05, function(v){ pd.stickThickness=v; applyPaddleGeometry(pd); }, function(v){return v.toFixed(2)+' cm';}));
       sec2.appendChild(makeSlider('orientation', pd.stickOrientation, 0, 359, 5, function(v){ pd.stickOrientation=v; applyPaddleGeometry(pd); }, function(v){return v+'°';}));
       box.appendChild(sec2);
